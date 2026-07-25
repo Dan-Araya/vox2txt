@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    # Windows is here on purpose: it is the platform hardest to test by hand,
+    # so at least catch import and entry-point breakage on every push.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install PortAudio (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2
+
+      - name: Install
+        run: uv pip install --system -e .
+
+      - name: Entry point resolves
+        run: vox2txt --help
+
+      - name: Modules import
+        run: |
+          python -c "import vox2txt.cli, vox2txt.config, vox2txt.transcriber, vox2txt.paster, vox2txt.hotkey, vox2txt.app, vox2txt.setup_cmd; print('imports ok')"
+
+      - name: Config round-trips
+        run: |
+          python -c "
+          import tomllib
+          from vox2txt.config import DEFAULT_CONFIG_TOML, load, write_default_config
+          from pathlib import Path
+          tomllib.loads(DEFAULT_CONFIG_TOML)
+          p = write_default_config()
+          cfg = load(Path(p))
+          assert cfg['hotkey']['key'], cfg
+          assert cfg['transcription']['model'], cfg
+          print('config ok:', p)
+          "
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uv pip install --system twine && twine check dist/*

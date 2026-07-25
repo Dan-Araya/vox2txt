@@ -33,7 +33,7 @@ Prefer `pipx`? `pipx install vox2txt` works the same way.
 
 Hold **Alt Gr**, speak, release. The transcription lands in the focused window.
 
-First run downloads the model (~145 MB for `base`). After that everything is local.
+First run downloads the model (142 MB for `base`). After that everything is local.
 
 ```
 vox2txt            # start it
@@ -97,17 +97,20 @@ A `config.toml` in the current working directory takes precedence, which is hand
 | Model  | Download | Speed    | Accuracy |
 |--------|----------|----------|----------|
 | tiny   | ~75 MB   | fastest  | lowest   |
-| base   | ~145 MB  | fast     | good     |
+| base   | 142 MB   | fast     | good     |
 | small  | ~480 MB  | medium   | better   |
 | medium | ~1.5 GB  | slow     | great    |
 | large  | ~3 GB    | slowest  | best     |
+
+Only `base` has been measured; the rest are approximate. `large` resolves to
+`large-v3`.
 
 ## How it works on Linux
 
 Wayland deliberately gives applications no way to read the keyboard globally or to synthesise keystrokes, so vox2txt goes to the kernel instead:
 
 - **Hotkey** — reads `/dev/input` directly via evdev, which needs your user in the `input` group.
-- **Paste** — creates a virtual keyboard on `/dev/uinput` and types Ctrl+V into it. A udev rule tags that device `uaccess`, so logind grants access to whoever owns the active session; no group needed.
+- **Paste** — creates a virtual keyboard on `/dev/uinput` and presses the configured shortcut on it. A udev rule tags that device `uaccess`, so logind grants access to whoever owns the active session; no group needed.
 
 `vox2txt setup` does both. It prints every privileged command and asks before running anything:
 
@@ -119,7 +122,27 @@ usermod -aG input $USER              read access to /dev/input
 
 The `input` group only takes effect on a **new login session** — log out and back in before the hotkey works.
 
-`wl-clipboard` (Wayland) or `xclip` (X11) must be installed: `sudo dnf install wl-clipboard`.
+A clipboard tool must be installed — `wl-clipboard` on Wayland, `xclip` on X11:
+
+```bash
+sudo dnf install wl-clipboard      # Fedora
+sudo apt install wl-clipboard      # Debian, Ubuntu
+sudo pacman -S wl-clipboard        # Arch
+```
+
+`vox2txt doctor` names the right package for your distro if it is missing.
+
+### On X11
+
+The hotkey uses `pynput` there instead of evdev, and it is **not** installed by
+default. Add it:
+
+```bash
+uv tool install --with pynput vox2txt
+```
+
+Pasting uses `xdotool` if present and falls back to the same `/dev/uinput` path
+as Wayland otherwise.
 
 ### Why not wtype or ydotool?
 
@@ -129,9 +152,18 @@ The `input` group only takes effect on a **new login session** — log out and b
 
 Start with `vox2txt doctor` — it checks each piece separately.
 
-**Nothing is pasted, but the text is on the clipboard.** The virtual keyboard could not be created. Check `/dev/uinput` is writable and the `uinput` module is loaded (`lsmod | grep uinput`).
+**In a terminal I get a literal `^V` instead of my text.** Ctrl+V is not paste
+in a terminal — readline reads it as quoted-insert. See
+[Choosing the paste shortcut](#choosing-the-paste-shortcut); either set
+`shortcut = "ctrl+shift+v"` or rebind your terminal's paste to Ctrl+V.
+
+**Nothing is pasted, but the text is on the clipboard.** Either the virtual keyboard could not be created — check `/dev/uinput` is writable and the `uinput` module is loaded (`lsmod | grep uinput`) — or the shortcut is wrong for the app you are pasting into.
 
 **The hotkey does nothing.** You are probably not in the `input` group yet, or you have not logged out since being added.
+
+**The hotkey fires while I am typing normally.** The default is Alt Gr, which on
+Spanish, Latin American and most European layouts is how you type `@ \ | ~ [ ] { }`.
+Set `key = "scroll_lock"` instead.
 
 **It pastes into the wrong window.** The paste goes wherever focus is when transcription *finishes*, not when you started talking.
 

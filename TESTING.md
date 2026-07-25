@@ -12,9 +12,23 @@ All on one machine: Fedora 41, GNOME 47, Wayland, Python 3.13.
 | Transcription of synthetic speech (base, int8, CPU) | 2.3 s for 3.8 s of audio |
 | 1 s of silence | returns `""` — VAD suppresses the hallucination |
 | Ctrl+V into a focused GTK4 window | pass, marker text landed in the entry |
+| Ctrl+Shift+V into a focused GTK4 window | does **not** paste |
+| Ctrl+V into gnome-terminal | does **not** paste |
+| Ctrl+Shift+V into gnome-terminal | pass |
+| Shift+Insert into gnome-terminal | pastes the *primary selection*, not the clipboard |
+| `paste.shortcut` parser, valid and invalid input | pass, bad values rejected with a reason |
 | `vox2txt` starts and reaches "ready" | pass |
 | `vox2txt setup` dry run (stdin closed) | lists correct, copy-pasteable commands |
 | Dependency tree size | 388 MB |
+| `base` model download | 142 MB |
+
+The shortcut results are why `paste.shortcut` exists: no combination covers both
+terminals and GUI apps, and they are exact inverses of each other.
+
+> Testing paste by spawning windows is unreliable on a machine someone is using
+> — a stray window steals focus and the text lands somewhere else. Close every
+> test window between runs, and check for orphans with
+> `pgrep -af "read -r line"` before trusting a negative result.
 
 ## What has never been exercised
 
@@ -36,6 +50,11 @@ Be explicit about this, because it is most of the surface area.
   but has never run.
 - **CUDA**, models other than `base`, languages other than Spanish.
 - **`uv tool install vox2txt`** from a real index — the package is unpublished.
+- **The ydotool fallback.** `_ydotool_ready()` was confirmed to reject a stale
+  socket, but the fallback never fires in practice because uinput always
+  succeeds first.
+- **`mode = "clipboard_only"`** and the `notify-send` path on a desktop without
+  a notification daemon.
 
 ## Testing in virtual machines
 
@@ -126,7 +145,9 @@ text editor and run `vox2txt` with `mode = "auto"`.
 [ ] log out and back in
 [ ] vox2txt doctor                      -> now all green?
 [ ] vox2txt, hold the hotkey, speak     -> text pasted into a focused editor
+[ ] same again, into a terminal         -> does the configured shortcut suit it?
 [ ] long hold                           -> exactly one recording, not several
 [ ] hold and release with no speech     -> "No speech detected", no invented text
+[ ] type @ or [ with an AltGr layout    -> does the default hotkey misfire?
 [ ] autostart, if enabled               -> running after a reboot
 ```

@@ -54,7 +54,8 @@
   Auto-detecting the focused window would solve it, but
   `org.gnome.Shell.Introspect.GetWindows` refuses unlisted callers, and no
   Wayland protocol exposes the focused app. A GNOME extension could, at the
-  cost of shipping an extension.
+  cost of shipping an extension. The recommended way out is rebinding the
+  terminal's paste to Ctrl+V, which the README documents.
 
 - Paste lands wherever focus is when transcription *finishes*, not where it was
   when recording started. Inherent to the design; worth documenting rather than
@@ -67,7 +68,13 @@
   faster-whisper. We decode no files and only `onnxruntime` is genuinely used
   (for VAD), but neither can be dropped without vendoring.
 
-## Unrelated, but found on the dev machine
+## Things about the dev machine that will skew testing
+
+**GNOME Terminal's paste has been rebound to Ctrl+V** there
+(`org.gnome.Terminal.Legacy.Keybindings` → `paste`). That is the recommended
+setup, but it means the `^V` problem will *not* reproduce on that machine.
+Test the default shortcut behaviour on a fresh VM, or temporarily restore
+`'<Control><Shift>v'`.
 
 `/etc/udev/rules.d/51-android.rules` is malformed: a missing line-continuation
 backslash turns its second line into an unconditional rule, so **236 of 254**

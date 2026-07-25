@@ -59,8 +59,26 @@ vad_filter = true       # trim silence so Whisper stops inventing text
 
 [paste]
 mode = "auto"           # "auto" = paste immediately | "clipboard_only" = just copy
+shortcut = "ctrl+v"     # "ctrl+v" for GUI apps | "ctrl+shift+v" for terminals
 notify = true
 ```
+
+### Choosing the paste shortcut
+
+There is no combination that works everywhere. Measured on GNOME 47:
+
+| Shortcut | GUI apps (GTK entry) | Terminal (VTE) |
+|---|---|---|
+| `ctrl+v` | pastes | **no** — readline shows a literal `^V` |
+| `ctrl+shift+v` | **no** | pastes |
+| `shift+insert` | — | pastes the *primary selection*, not the clipboard |
+
+The default is `ctrl+v` because most dictation targets are GUI apps. If you
+mostly dictate into a terminal, set `shortcut = "ctrl+shift+v"`.
+
+If you split your time, the better fix is on the terminal side: most terminals
+let you rebind paste to Ctrl+V (GNOME Terminal: Preferences → Shortcuts →
+Paste). Then `ctrl+v` works everywhere and you never think about it again.
 
 Setting `language` explicitly is noticeably faster than `auto`, which spends time detecting.
 

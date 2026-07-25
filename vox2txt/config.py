@@ -16,7 +16,7 @@ _DEFAULTS = {
         "compute_type": "auto",
         "vad_filter": True,
     },
-    "paste": {"mode": "auto", "notify": True},
+    "paste": {"mode": "auto", "notify": True, "shortcut": "ctrl+v"},
 }
 
 DEFAULT_CONFIG_TOML = """\
@@ -45,9 +45,21 @@ compute_type = "auto"
 vad_filter = true
 
 [paste]
-# "auto"           = transcribe -> clipboard -> simulate Ctrl+V in active window
+# "auto"           = transcribe -> clipboard -> press the shortcut below
 # "clipboard_only" = transcribe -> clipboard only (no key simulation)
 mode = "auto"
+
+# Which key combination pastes. There is no single right answer: terminals and
+# GUI apps disagree, and they do not overlap.
+#
+#   "ctrl+v"        pastes in GUI apps (browsers, editors, chat).
+#                   In a terminal it does nothing useful -- readline treats it
+#                   as quoted-insert and you see a literal ^V.
+#   "ctrl+shift+v"  pastes in terminals. Does nothing in a plain GTK entry.
+#
+# Pick whichever matches where you dictate most. If you split your time, some
+# terminals let you rebind paste to Ctrl+V, which lets you keep "ctrl+v" here.
+shortcut = "ctrl+v"
 
 # Show desktop notification after each transcription
 notify = true

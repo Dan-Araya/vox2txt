@@ -170,47 +170,126 @@ def _ydotool_ready() -> bool:
         sock.close()
 
 
-def _simulate_paste_uinput() -> bool:
-    """Inject Ctrl+V via /dev/uinput, falling back to ydotool if a daemon is up."""
+DEFAULT_SHORTCUT = "ctrl+v"
+
+_MODIFIER_ALIASES = {
+    "ctrl": "LEFTCTRL",
+    "control": "LEFTCTRL",
+    "shift": "LEFTSHIFT",
+    "alt": "LEFTALT",
+    "super": "LEFTMETA",
+    "meta": "LEFTMETA",
+    "win": "LEFTMETA",
+}
+
+
+def _parse_shortcut(spec: str):
+    """'ctrl+shift+v' -> (KEY_V, [KEY_LEFTCTRL, KEY_LEFTSHIFT])."""
+    from evdev import ecodes as e
+
+    parts = [p.strip().lower() for p in spec.split("+") if p.strip()]
+    if not parts:
+        raise ValueError(f"empty paste shortcut: {spec!r}")
+    *modifiers, key = parts
+
+    codes = []
+    for modifier in modifiers:
+        name = _MODIFIER_ALIASES.get(modifier)
+        if name is None:
+            raise ValueError(f"unknown modifier {modifier!r} in {spec!r}")
+        codes.append(e.ecodes[f"KEY_{name}"])
+
+    key_name = f"KEY_{key.upper()}"
+    if key_name not in e.ecodes:
+        raise ValueError(f"unknown key {key!r} in {spec!r}")
+    return e.ecodes[key_name], codes
+
+
+def validate_shortcut(spec: str) -> None:
+    """Raise ValueError if the configured shortcut cannot be parsed."""
+    if platform.system() == "Windows" or not _is_wayland():
+        return  # those paths parse the string themselves
+    _parse_shortcut(spec)
+
+
+def _simulate_paste_uinput(shortcut: str = DEFAULT_SHORTCUT) -> bool:
+    """Inject the paste shortcut via /dev/uinput, falling back to ydotool."""
     try:
-        from evdev import ecodes as e
-        if _keyboard.tap(e.KEY_V, modifiers=[e.KEY_LEFTCTRL]):
-            return True
-    except ImportError:
-        print("[vox2txt] evdev not installed — pip install evdev")
+        key, modifiers = _parse_shortcut(shortcut)
+    except (ImportError, ValueError) as exc:
+        print(f"[vox2txt] {exc}")
+        return False
+
+    if _keyboard.tap(key, modifiers=modifiers):
+        return True
+
     if _ydotool_ready():
+        # ydotool speaks raw keycodes: press modifiers, tap, release in reverse.
+        sequence = [f"{m}:1" for m in modifiers] + [f"{key}:1", f"{key}:0"]
+        sequence += [f"{m}:0" for m in reversed(modifiers)]
         try:
-            subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],
-                           check=True, timeout=3)
+            subprocess.run(["ydotool", "key", *sequence], check=True, timeout=3)
             return True
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
     return False
 
 
-def _simulate_paste():
+def _simulate_paste_pynput(shortcut: str) -> bool:
+    try:
+        from pynput.keyboard import Controller, Key
+    except ImportError:
+        return False
+
+    pynput_modifiers = {
+        "ctrl": Key.ctrl, "control": Key.ctrl,
+        "shift": Key.shift,
+        "alt": Key.alt,
+        "super": Key.cmd, "meta": Key.cmd, "win": Key.cmd,
+    }
+    parts = [p.strip().lower() for p in shortcut.split("+") if p.strip()]
+    if not parts:
+        return False
+    *modifier_names, key_name = parts
+
+    try:
+        modifiers = [pynput_modifiers[m] for m in modifier_names]
+    except KeyError as exc:
+        print(f"[vox2txt] unknown modifier {exc} in paste shortcut {shortcut!r}")
+        return False
+    key = getattr(Key, key_name, key_name) if len(key_name) > 1 else key_name
+
+    try:
+        keyboard = Controller()
+        time.sleep(0.05)
+        for modifier in modifiers:
+            keyboard.press(modifier)
+        keyboard.press(key)
+        keyboard.release(key)
+        for modifier in reversed(modifiers):
+            keyboard.release(modifier)
+        return True
+    except Exception as exc:
+        print(f"[vox2txt] paste failed: {exc}")
+        return False
+
+
+def _simulate_paste(shortcut: str = DEFAULT_SHORTCUT):
     if platform.system() == "Windows":
-        try:
-            from pynput.keyboard import Controller, Key
-            time.sleep(0.05)
-            kb = Controller()
-            with kb.pressed(Key.ctrl):
-                kb.press("v")
-                kb.release("v")
-            return True
-        except Exception:
-            return False
+        return _simulate_paste_pynput(shortcut)
     elif _is_wayland():
-        return _simulate_paste_uinput()
+        return _simulate_paste_uinput(shortcut)
     else:
+        # xdotool's key syntax happens to match ours exactly.
         try:
-            subprocess.run(["xdotool", "key", "ctrl+v"], check=True, timeout=3)
+            subprocess.run(["xdotool", "key", shortcut], check=True, timeout=3)
             return True
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return False
+            return _simulate_paste_uinput(shortcut)
 
 
-def paste(text: str, mode: str = "auto", notify: bool = True):
+def paste(text: str, mode: str = "auto", notify: bool = True,
+          shortcut: str = DEFAULT_SHORTCUT):
     if not text:
         return
 
@@ -222,7 +301,7 @@ def paste(text: str, mode: str = "auto", notify: bool = True):
             _notify("vox2txt", f"Copied: {preview}")
         return
 
-    pasted = _simulate_paste()
+    pasted = _simulate_paste(shortcut)
     if pasted:
         if notify:
             _notify("vox2txt", f"Pasted: {preview}")

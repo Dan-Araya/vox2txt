@@ -29,6 +29,7 @@ def run() -> int:
 
     paste_mode = cfg["paste"]["mode"]
     notify = cfg["paste"]["notify"]
+    paste_shortcut = cfg["paste"].get("shortcut", paster.DEFAULT_SHORTCUT)
 
     def on_press():
         nonlocal state
@@ -51,7 +52,8 @@ def run() -> int:
             try:
                 text = transcriber.transcribe(audio)
                 if text:
-                    paster.paste(text, mode=paste_mode, notify=notify)
+                    paster.paste(text, mode=paste_mode, notify=notify,
+                                 shortcut=paste_shortcut)
                 elif notify:
                     try:
                         subprocess.run(
@@ -71,6 +73,12 @@ def run() -> int:
     # Create the virtual keyboard now: the compositor needs a moment to notice
     # a new input device, and that wait should not land on the first paste.
     if paste_mode != "clipboard_only":
+        try:
+            # Fail here on a typo, rather than silently at the first paste.
+            paster.validate_shortcut(paste_shortcut)
+        except ValueError as exc:
+            print(f"[vox2txt] Bad paste.shortcut in config: {exc}")
+            return 1
         paster.warm_up()
 
     key = cfg["hotkey"]["key"]
@@ -81,6 +89,8 @@ def run() -> int:
         return 1
 
     print(f"vox2txt ready — hold [{key}] to record, release to transcribe.")
+    if paste_mode != "clipboard_only":
+        print(f"Pasting with [{paste_shortcut}].")
     print("Press Ctrl+C to exit.\n")
 
     stop_event = threading.Event()

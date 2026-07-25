@@ -46,6 +46,16 @@
 
 ## Known rough edges
 
+- **No paste shortcut works everywhere.** Measured on GNOME 47: `ctrl+v` pastes
+  in GTK entries but not in VTE terminals (readline treats it as
+  quoted-insert); `ctrl+shift+v` is the exact inverse; `shift+insert` pastes the
+  primary selection rather than the clipboard, so it is useless here. The
+  shortcut is configurable via `paste.shortcut` and defaults to `ctrl+v`.
+  Auto-detecting the focused window would solve it, but
+  `org.gnome.Shell.Introspect.GetWindows` refuses unlisted callers, and no
+  Wayland protocol exposes the focused app. A GNOME extension could, at the
+  cost of shipping an extension.
+
 - Paste lands wherever focus is when transcription *finishes*, not where it was
   when recording started. Inherent to the design; worth documenting rather than
   fixing.

@@ -107,6 +107,17 @@ Start with `vox2txt doctor` — it checks each piece separately.
 
 **It pastes into the wrong window.** The paste goes wherever focus is when transcription *finishes*, not when you started talking.
 
+## Status
+
+Developed and verified on Fedora 41 / GNOME 47 / Wayland. The core is not tied
+to that: the hotkey reads `/dev/input` and the paste writes to `/dev/uinput`,
+both kernel interfaces that work under any desktop, X11 or Wayland. Distros
+without systemd fall back to a `GROUP="input"` udev rule.
+
+Windows, X11 and non-systemd distros are **implemented but not yet tested**.
+See [TESTING.md](TESTING.md) for exactly what has been verified and
+[TODO.md](TODO.md) for open items.
+
 ## Contributing
 
 ```bash
@@ -115,6 +126,9 @@ cd vox2txt
 uv venv && uv pip install -e .
 .venv/bin/vox2txt doctor
 ```
+
+For daily use from a checkout, `uv tool install --editable .` puts `vox2txt` on
+your PATH while still pointing at the working tree.
 
 ## License
 

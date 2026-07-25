@@ -18,11 +18,51 @@ MODULE_CONF_PATH = Path("/etc/modules-load.d/vox2txt.conf")
 UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / "vox2txt.service"
 
 # uaccess makes logind hand an ACL to whoever owns the active local session,
-# so the paste works without adding anyone to a group.
+# so the paste works without adding anyone to a group. It needs logind, so
+# distros without systemd or elogind get the plain group form instead.
 # Stored without a trailing newline: printf's format string supplies it, which
 # is the only form that survives being copy-pasted into a shell.
-UDEV_RULE = 'KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"'
+UDEV_RULE_UACCESS = (
+    'KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"'
+)
+UDEV_RULE_GROUP = (
+    'KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", '
+    'GROUP="input", MODE="0660"'
+)
 MODULE_CONF = "uinput"
+
+_PKG_COMMANDS = {
+    "dnf": "sudo dnf install",
+    "apt": "sudo apt install",
+    "pacman": "sudo pacman -S",
+    "zypper": "sudo zypper install",
+    "apk": "sudo apk add",
+    "xbps-install": "sudo xbps-install",
+    "emerge": "sudo emerge",
+}
+
+# Same package, different name depending on who is packaging it.
+_PKG_NAMES = {
+    "wl-copy": {"default": "wl-clipboard"},
+    "xclip": {"default": "xclip"},
+}
+
+
+def _has_logind() -> bool:
+    """uaccess ACLs come from logind; without it we must fall back to a group."""
+    return Path("/run/systemd/seats").is_dir() or Path("/run/elogind").exists()
+
+
+def _has_systemd() -> bool:
+    return Path("/run/systemd/system").is_dir()
+
+
+def _install_hint(binary: str) -> str:
+    names = _PKG_NAMES.get(binary, {})
+    for manager, command in _PKG_COMMANDS.items():
+        if shutil.which(manager):
+            return f"{command} {names.get(manager, names.get('default', binary))}"
+    return f"install '{binary}' with your package manager"
 
 UNIT_TEMPLATE = """\
 [Unit]
@@ -92,15 +132,17 @@ def _sudo_write(path: Path, content: str) -> bool:
 def _setup_linux() -> int:
     exec_path = shutil.which("vox2txt") or f"{sys.executable} -m vox2txt"
 
+    udev_rule = UDEV_RULE_UACCESS if _has_logind() else UDEV_RULE_GROUP
+
     # (description, copy-pasteable command, thunk that performs it)
     root_steps = []
     if not UDEV_RULE_PATH.exists():
         root_steps.append((
             f"write {UDEV_RULE_PATH} so /dev/uinput is usable without root",
-            f"printf '%s\\n' {shlex.quote(UDEV_RULE)} | sudo tee {UDEV_RULE_PATH}",
-            lambda: _sudo_write(UDEV_RULE_PATH, UDEV_RULE),
+            f"printf '%s\\n' {shlex.quote(udev_rule)} | sudo tee {UDEV_RULE_PATH}",
+            lambda: _sudo_write(UDEV_RULE_PATH, udev_rule),
         ))
-    if not MODULE_CONF_PATH.exists():
+    if _has_systemd() and not MODULE_CONF_PATH.exists():
         root_steps.append((
             f"write {MODULE_CONF_PATH} so the uinput module loads at boot",
             f"printf '%s\\n' {shlex.quote(MODULE_CONF)} | sudo tee {MODULE_CONF_PATH}",
@@ -134,7 +176,10 @@ def _setup_linux() -> int:
         print("\n[ok] System permissions already in place.")
 
     print()
-    if _confirm("Start vox2txt automatically when you log in?"):
+    if not _has_systemd():
+        print("[--] No systemd here, so no autostart unit. Launch vox2txt from")
+        print("     whatever your desktop uses for startup programs.")
+    elif _confirm("Start vox2txt automatically when you log in?"):
         UNIT_PATH.parent.mkdir(parents=True, exist_ok=True)
         UNIT_PATH.write_text(UNIT_TEMPLATE.format(exec_path=exec_path), encoding="utf-8")
         print(f"  wrote {UNIT_PATH}")
@@ -256,7 +301,7 @@ def run_doctor() -> int:
         ok &= _check(
             f"{tool} installed",
             shutil.which(tool) is not None,
-            f"Install it: sudo dnf install {'wl-clipboard' if tool == 'wl-copy' else 'xclip'}",
+            f"Install it: {_install_hint(tool)}",
         )
     else:
         try:

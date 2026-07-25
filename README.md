@@ -76,9 +76,19 @@ There is no combination that works everywhere. Measured on GNOME 47:
 The default is `ctrl+v` because most dictation targets are GUI apps. If you
 mostly dictate into a terminal, set `shortcut = "ctrl+shift+v"`.
 
-If you split your time, the better fix is on the terminal side: most terminals
-let you rebind paste to Ctrl+V (GNOME Terminal: Preferences → Shortcuts →
-Paste). Then `ctrl+v` works everywhere and you never think about it again.
+If you split your time, the better fix is on the terminal side: rebind the
+terminal's paste to Ctrl+V and then `ctrl+v` works everywhere. For GNOME
+Terminal:
+
+```bash
+gsettings set \
+  org.gnome.Terminal.Legacy.Keybindings:/org/gnome/terminal/legacy/keybindings/ \
+  paste '<Control>v'
+```
+
+Leave `copy` alone — Ctrl+C must stay SIGINT. The only thing you give up is
+readline's quoted-insert, which almost nobody uses. Other terminals have the
+equivalent setting in their config (kitty, alacritty, foot, wezterm all do).
 
 Setting `language` explicitly is noticeably faster than `auto`, which spends time detecting.
 

@@ -61,7 +61,7 @@ vox2txt setup      # permissions and autostart
 
 ```toml
 [hotkey]
-key = "alt_gr"          # "alt_gr" | "right_ctrl" | "scroll_lock"
+key = "alt_gr"          # "alt_gr" | "right_ctrl" | "scroll_lock" -- these three only
 
 [transcription]
 model = "base"          # tiny | base | small | medium | large
@@ -75,6 +75,11 @@ mode = "auto"           # "auto" = paste immediately | "clipboard_only" = just c
 shortcut = "ctrl+v"     # "ctrl+v" for GUI apps | "ctrl+shift+v" for terminals
 notify = true
 ```
+
+The hotkey is a closed list of three keys, not an arbitrary key name, and it
+cannot be a combination — push-to-talk needs a key that is held down and does
+nothing else while held, which rules out most of the keyboard. Anything outside
+that list fails at startup with `Unsupported key`.
 
 ### Choosing the paste shortcut
 
@@ -187,7 +192,11 @@ to that: the hotkey reads `/dev/input` and the paste writes to `/dev/uinput`,
 both kernel interfaces that work under any desktop, X11 or Wayland. Distros
 without systemd fall back to a `GROUP="input"` udev rule.
 
-Windows, X11 and non-systemd distros are **implemented but not yet tested**.
+Windows is **confirmed working**: install with uv, `doctor` green, and dictation
+into Notepad and Google Docs with the default settings. Its `setup` — the
+autostart shortcut — is still untested.
+
+X11 and non-systemd distros are **implemented but not yet tested**.
 See [TESTING.md](TESTING.md) for exactly what has been verified and
 [TODO.md](TODO.md) for open items.
 

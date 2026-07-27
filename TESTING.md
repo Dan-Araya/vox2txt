@@ -34,9 +34,10 @@ terminals and GUI apps, and they are exact inverses of each other.
 
 Be explicit about this, because it is most of the surface area.
 
-- **Real microphone capture.** The transcription test fed a numpy array
-  straight to `Transcriber`. `Recorder` and its `sounddevice` stream have
-  never run. Daily use covers this immediately.
+- **Real microphone capture on Linux.** The transcription test fed a numpy
+  array straight to `Transcriber`; `Recorder` and its `sounddevice` stream
+  have never run there. They do work on Windows — see below — so the code is
+  not wrong, but PortAudio is a different backend on each platform.
 - **`vox2txt setup` actually executing.** Only the dry run was tested; the
   sudo steps were never run, so the udev rule and `modules-load.d` file have
   never been written by the tool.
@@ -68,6 +69,8 @@ First contact, on a machine with neither uv nor git installed.
 | `vox2txt --help` | pass |
 | `vox2txt doctor` | **crashed**: `ModuleNotFoundError: No module named 'grp'` |
 | `vox2txt doctor`, after the fix | pass — microphone found, pynput present |
+| Dictation into Notepad, Alt Gr held, no config file | pass |
+| Dictation into Google Docs | pass |
 
 The crash was `setup_cmd.py` importing `grp` and `pwd` at module level. Both are
 POSIX-only, so the module could not be imported at all on Windows, which took
@@ -81,8 +84,17 @@ injects a paste, never records. The Linux branch checks four things because it
 has four things that can be denied; the Windows branch has no permissions to
 verify, so it verifies almost nothing.
 
-Still untested there: the hotkey, the paste, the `plyer` notification, the
-startup shortcut written by `setup`, and audio capture.
+Those two dictation runs are the first end-to-end use of the tool on any
+platform, and they cover more than every Linux check combined: `Recorder` and
+its `sounddevice` stream, a real microphone, the pynput hotkey and the pynput
+paste. They ran with no config file at all, on the built-in defaults.
+
+Ctrl+V is the right default on Windows, unlike on Linux: it pastes in GUI apps
+*and* in Windows Terminal, so `paste.shortcut` has no reason to be touched there.
+
+Still untested on Windows: `vox2txt setup` and the startup shortcut it writes,
+and the `plyer` notification — whether one appeared during those runs was not
+recorded.
 
 ## Testing in virtual machines
 

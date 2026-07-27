@@ -11,7 +11,7 @@
 - [ ] **Create the `pypi` environment** in the GitHub repo settings, or the
       workflow's `environment: pypi` will not resolve.
 - [ ] Publishing is effectively irreversible: a yanked version cannot be
-      reused. Tag `v0.1.0` only when the Windows run has been confirmed.
+      reused. The Windows run is now confirmed, so that blocker is gone.
 
 ## Open decisions
 
@@ -22,6 +22,10 @@
       is unused on virtually every layout and would be a safer default, with
       `alt_gr` documented as an option. One line in `config.py` and one in
       `DEFAULT_CONFIG_TOML`. Not changed yet — this is the maintainer's call.
+      Data point: a Windows session dictating in Spanish reported no spurious
+      recordings with the `alt_gr` default. That is one session, not a
+      refutation — the failure mode needs someone *typing* `@` or `[`, which
+      dictating does not do.
 - [ ] **Ship a `.exe`?** Decided against for now. An unsigned PyInstaller build
       that installs a global keyboard hook and synthesises keystrokes is very
       likely to be flagged by Defender/SmartScreen, would weigh 300-500 MB
@@ -42,7 +46,13 @@
 - [ ] No tests in CI beyond imports and entry-point resolution. There is no
       pytest suite; `ci.yml` only smoke-tests.
 - [ ] `hotkey.py` supports exactly three keys (`alt_gr`, `right_ctrl`,
-      `scroll_lock`). Arbitrary keys and combinations are not supported.
+      `scroll_lock`). Arbitrary keys and combinations are not supported, and
+      the three cannot be combined with each other either. Deliberately left
+      as is: the three work, and push-to-talk needs a key that can be held
+      without doing anything else, which excludes most of the keyboard.
+      Adding more is a small change — one entry in each of the two maps in
+      `hotkey.py` — so this is only worth doing when someone actually wants a
+      key that is not on the list.
 
 ## Known rough edges
 

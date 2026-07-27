@@ -67,17 +67,22 @@ First contact, on a machine with neither uv nor git installed.
 | `uv tool install`, entry point on `PATH` | pass |
 | `vox2txt --help` | pass |
 | `vox2txt doctor` | **crashed**: `ModuleNotFoundError: No module named 'grp'` |
+| `vox2txt doctor`, after the fix | pass — microphone found, pynput present |
 
 The crash was `setup_cmd.py` importing `grp` and `pwd` at module level. Both are
 POSIX-only, so the module could not be imported at all on Windows, which took
 `doctor` and `setup` down with it — `--help` survived because `cli.py` imports
 that module lazily, per subcommand. They are now imported inside the three Linux
-helpers that use them. The fix was verified on Linux by blocking `grp`/`pwd` and
-forcing `sys.platform`; it has **not** been re-run on Windows yet.
+helpers that use them.
 
-Nothing past that point has been exercised: the hotkey, the paste, the
-`plyer` notification, the startup shortcut written by `setup` and audio capture
-are all still untested there.
+Note how little a green `doctor` proves on Windows: it checks that a microphone
+exists and that `pynput` imports, and that is all. It never presses a key, never
+injects a paste, never records. The Linux branch checks four things because it
+has four things that can be denied; the Windows branch has no permissions to
+verify, so it verifies almost nothing.
+
+Still untested there: the hotkey, the paste, the `plyer` notification, the
+startup shortcut written by `setup`, and audio capture.
 
 ## Testing in virtual machines
 

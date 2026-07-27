@@ -4,9 +4,7 @@ Everything privileged lives here, and nothing runs without showing the exact
 command first and asking.
 """
 
-import grp
 import os
-import pwd
 import shlex
 import shutil
 import subprocess
@@ -81,12 +79,21 @@ WantedBy=graphical-session.target
 """
 
 
+# grp and pwd only exist on POSIX, so they are imported where they are used.
+# Everything below is reached from the Linux path alone; importing them at the
+# top would make this module unloadable on Windows, taking 'doctor' with it.
+
+
 def _username() -> str:
+    import pwd
+
     return pwd.getpwuid(os.getuid()).pw_name
 
 
 def _input_group_member() -> bool:
     """Listed in /etc/group. True as soon as usermod runs."""
+    import grp
+
     try:
         return _username() in grp.getgrnam("input").gr_mem
     except KeyError:
@@ -95,6 +102,8 @@ def _input_group_member() -> bool:
 
 def _input_group_active() -> bool:
     """Actually granted to *this* process. Only true after a fresh login."""
+    import grp
+
     try:
         return grp.getgrnam("input").gr_gid in os.getgroups()
     except KeyError:

@@ -2,8 +2,8 @@
 
 ## Before the first release
 
-- [ ] **Replace the placeholder URLs.** `pyproject.toml` says `github.com/dan/vox2txt`
-      and `README.md` says `your-username`. Both are wrong.
+- [x] **Replace the placeholder URLs.** Now `github.com/Dan-Araya/vox2txt`
+      everywhere: `pyproject.toml`, `README.md` and `TESTING.md`.
 - [ ] **Configure PyPI trusted publishing** before pushing the first tag, at
       <https://pypi.org/manage/account/publishing/>: owner/repo, workflow
       `publish.yml`, environment `pypi`. Without it `publish.yml` fails at the

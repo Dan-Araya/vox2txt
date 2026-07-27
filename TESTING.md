@@ -43,7 +43,7 @@ Be explicit about this, because it is most of the surface area.
 - **The systemd user unit.** Never installed, never enabled, never confirmed
   to start at login. `graphical-session.target` is reached under GNOME and
   KDE but not under every bare window manager.
-- **Windows.** Nothing at all.
+- **Windows.** Barely started — see the section below.
 - **X11.** A different code path end to end: `pynput` for the hotkey (needs
   the `x11` extra) and `xdotool` for the paste.
 - **Distros without systemd.** The `GROUP="input"` udev fallback is written
@@ -55,6 +55,29 @@ Be explicit about this, because it is most of the surface area.
   succeeds first.
 - **`mode = "clipboard_only"`** and the `notify-send` path on a desktop without
   a notification daemon.
+
+## Windows
+
+First contact, on a machine with neither uv nor git installed.
+
+| Check | Result |
+|---|---|
+| `winget install --id=astral-sh.uv -e` | pass — the `irm \| iex` installer in uv's docs did not work here |
+| `winget install --id Git.Git -e` | pass — needed because the package is unpublished, so it installs from git |
+| `uv tool install`, entry point on `PATH` | pass |
+| `vox2txt --help` | pass |
+| `vox2txt doctor` | **crashed**: `ModuleNotFoundError: No module named 'grp'` |
+
+The crash was `setup_cmd.py` importing `grp` and `pwd` at module level. Both are
+POSIX-only, so the module could not be imported at all on Windows, which took
+`doctor` and `setup` down with it — `--help` survived because `cli.py` imports
+that module lazily, per subcommand. They are now imported inside the three Linux
+helpers that use them. The fix was verified on Linux by blocking `grp`/`pwd` and
+forcing `sys.platform`; it has **not** been re-run on Windows yet.
+
+Nothing past that point has been exercised: the hotkey, the paste, the
+`plyer` notification, the startup shortcut written by `setup` and audio capture
+are all still untested there.
 
 ## Testing in virtual machines
 
@@ -75,7 +98,7 @@ GitHub, which is the same path as PyPI minus the index:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install git+https://github.com/your-username/vox2txt
+uv tool install git+https://github.com/Dan-Araya/vox2txt
 ```
 
 That catches packaging mistakes — missing modules, a broken entry point, a
@@ -139,7 +162,7 @@ text editor and run `vox2txt` with `mode = "auto"`.
 ### Checklist per guest
 
 ```
-[ ] uv tool install git+https://github.com/your-username/vox2txt
+[ ] uv tool install git+https://github.com/Dan-Araya/vox2txt
 [ ] vox2txt doctor                      -> note which checks fail and why
 [ ] vox2txt setup                       -> commands correct for this distro?
 [ ] log out and back in

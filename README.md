@@ -19,10 +19,23 @@ vox2txt
 
 **Windows** (PowerShell)
 
+`winget` is the path that has actually been used. The `irm | iex` installer that
+uv's own docs give works too, but it depends on the execution policy allowing it.
+
 ```powershell
-irm https://astral.sh/uv/install.ps1 | iex
+winget install --id=astral-sh.uv -e
 uv tool install vox2txt
 vox2txt
+```
+
+Reopen PowerShell after the `winget` line, otherwise `uv` is not on `PATH` yet.
+
+Until the package is on PyPI, install it from the repository instead — that needs
+git, which a fresh Windows box does not have either:
+
+```powershell
+winget install --id Git.Git -e
+uv tool install git+https://github.com/Dan-Araya/vox2txt
 ```
 
 Windows needs no permission setup. Run `vox2txt setup` only if you want it to start automatically at login.
@@ -181,7 +194,7 @@ See [TESTING.md](TESTING.md) for exactly what has been verified and
 ## Contributing
 
 ```bash
-git clone https://github.com/your-username/vox2txt
+git clone https://github.com/Dan-Araya/vox2txt
 cd vox2txt
 uv venv && uv pip install -e .
 .venv/bin/vox2txt doctor

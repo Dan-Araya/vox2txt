@@ -4,14 +4,8 @@
 
 - [x] **Replace the placeholder URLs.** Now `github.com/Dan-Araya/vox2txt`
       everywhere: `pyproject.toml`, `README.md` and `TESTING.md`.
-- [ ] **Configure PyPI trusted publishing** before pushing the first tag, at
-      <https://pypi.org/manage/account/publishing/>: owner/repo, workflow
-      `publish.yml`, environment `pypi`. Without it `publish.yml` fails at the
-      last step. The name `vox2txt` was free on PyPI as of 2026-07-25.
-- [ ] **Create the `pypi` environment** in the GitHub repo settings, or the
-      workflow's `environment: pypi` will not resolve.
-- [ ] Publishing is effectively irreversible: a yanked version cannot be
-      reused. The Windows run is now confirmed, so that blocker is gone.
+- [ ] **~Configure PyPI trusted publishing~** — Decided against PyPI. GitHub-only
+      for now. `publish.yml` has been removed.
 
 ## Open decisions
 
@@ -72,6 +66,14 @@
   fixing.
 - The `input` group only takes effect at next login. `vox2txt setup` warns, but
   people will still miss it.
+- **vox2txt cannot start before someone logs in.** It needs a graphical session
+  for the hotkey, the paste and the clipboard, so the systemd unit hangs off
+  `graphical-session.target`. On a machine that boots to the login screen and
+  waits, vox2txt waits too. Only GDM autologin would change that, and that is
+  the user's security tradeoff to make, not ours.
+- A transcription that fails is reported and dropped; the audio is not retried.
+  Three failures in a row are treated as "this process is wedged" and it exits
+  for the supervisor to restart, which loses nothing but is a guess.
 - A `config.toml` in the working directory shadows the user config. Intentional
   for development, confusing if you run `vox2txt` from a checkout by accident.
 - `av` (102 MB) and `onnxruntime` (53 MB) are hard dependencies of

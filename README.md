@@ -6,41 +6,37 @@ Runs fully offline using [faster-whisper](https://github.com/SYSTRAN/faster-whis
 
 ## Install
 
-Both platforms use [uv](https://docs.astral.sh/uv/), which also installs Python for you if you don't have it.
+Both platforms need [uv](https://docs.astral.sh/uv/) (installs Python for you) and git.
 
 **Linux**
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install vox2txt
+uv tool install git+https://github.com/Dan-Araya/vox2txt
 vox2txt setup      # one-time: input permissions + optional autostart
 vox2txt
 ```
 
-**Windows** (PowerShell)
+`vox2txt setup` needs root for three things — a udev rule for `/dev/uinput`, the
+`uinput` module, and adding you to the `input` group — and it calls `sudo`, so
+your password would be typed inside vox2txt. You don't have to do that. It shows
+you every command before asking, and if you say no it prints the complete list
+for you to run in your own shell. Same for the autostart: it shows the unit file
+and the commands, and declining leaves you a block you can paste. Nothing runs
+without a yes.
 
-`winget` is the path that has actually been used. The `irm | iex` installer that
-uv's own docs give works too, but it depends on the execution policy allowing it.
+**Windows** (PowerShell)
 
 ```powershell
 winget install --id=astral-sh.uv -e
-uv tool install vox2txt
+winget install --id Git.Git -e
+uv tool install git+https://github.com/Dan-Araya/vox2txt
 vox2txt
 ```
 
-Reopen PowerShell after the `winget` line, otherwise `uv` is not on `PATH` yet.
-
-Until the package is on PyPI, install it from the repository instead — that needs
-git, which a fresh Windows box does not have either:
-
-```powershell
-winget install --id Git.Git -e
-uv tool install git+https://github.com/Dan-Araya/vox2txt
-```
+Reopen PowerShell after the `winget` lines so `uv` and `git` are on `PATH`.
 
 Windows needs no permission setup. Run `vox2txt setup` only if you want it to start automatically at login.
-
-Prefer `pipx`? `pipx install vox2txt` works the same way.
 
 ## Use
 
@@ -54,6 +50,46 @@ vox2txt doctor     # check microphone, hotkey, paste and clipboard
 vox2txt config     # print the config file path
 vox2txt setup      # permissions and autostart
 ```
+
+## Running it in the background
+
+`vox2txt setup` offers to start vox2txt automatically. It needs a logged-in
+session — the hotkey, the paste and the clipboard all talk to your desktop — so
+it starts at login, not at boot.
+
+**Linux.** It writes a systemd user unit to
+`~/.config/systemd/user/vox2txt.service`, hooked to `graphical-session.target`,
+and enables it. To check on it:
+
+```bash
+systemctl --user status vox2txt        # is it running?
+journalctl --user -u vox2txt -f        # what is it saying?
+systemctl --user restart vox2txt       # after editing the config
+```
+
+Don't run `loginctl enable-linger` for this: it would have systemd start
+vox2txt before a graphical session exists, and it would fail in a loop.
+
+**Windows.** It writes `vox2txt.cmd` to the Startup folder. The console window
+it opens has to stay: the launcher waits on the process so it can restart it.
+
+### What restarts and what doesn't
+
+vox2txt exits with a non-zero status — so the supervisor restarts it — only for
+failures a fresh process actually fixes:
+
+| | |
+|---|---|
+| Keyboard unplugged, hotkey listener dead | **restarts** (rescans `/dev/input`) |
+| Virtual keyboard lost while running | **restarts** |
+| Three failed transcriptions in a row | **restarts** |
+| `wl-copy`/`xclip` not installed | stays up, notifies you |
+| A single failed transcription | stays up, notifies you |
+| Invalid config | exits; five attempts and it gives up |
+
+Restarts are capped at 5 in 5 minutes, so a permanent failure ends in a stopped
+service rather than a loop. Clearing it after fixing the cause:
+`systemctl --user reset-failed vox2txt`.
 
 ## Configuration
 
@@ -130,13 +166,20 @@ Wayland deliberately gives applications no way to read the keyboard globally or 
 - **Hotkey** — reads `/dev/input` directly via evdev, which needs your user in the `input` group.
 - **Paste** — creates a virtual keyboard on `/dev/uinput` and presses the configured shortcut on it. A udev rule tags that device `uaccess`, so logind grants access to whoever owns the active session; no group needed.
 
-`vox2txt setup` does both. It prints every privileged command and asks before running anything:
+`vox2txt setup` does both. It prints every privileged command and asks before
+running anything, and if you decline it prints the same list again for you to
+run yourself:
 
 ```
 /etc/udev/rules.d/99-vox2txt.rules   uinput access for the active session
 /etc/modules-load.d/vox2txt.conf     load the uinput module at boot
 usermod -aG input $USER              read access to /dev/input
+modprobe uinput                      load the module now, not at next boot
+udevadm control --reload-rules
+udevadm trigger                      apply the rule just written
 ```
+
+It only lists what is actually missing, so a second run is usually a no-op.
 
 The `input` group only takes effect on a **new login session** — log out and back in before the hotkey works.
 
@@ -177,7 +220,7 @@ in a terminal — readline reads it as quoted-insert. See
 
 **Nothing is pasted, but the text is on the clipboard.** Either the virtual keyboard could not be created — check `/dev/uinput` is writable and the `uinput` module is loaded (`lsmod | grep uinput`) — or the shortcut is wrong for the app you are pasting into.
 
-**The hotkey does nothing.** You are probably not in the `input` group yet, or you have not logged out since being added.
+**The hotkey does nothing.** You are probably not in the `input` group yet, or you have not logged out since being added. Running as a service, `journalctl --user -u vox2txt` says which it is — vox2txt exits rather than sitting there deaf.
 
 **The hotkey fires while I am typing normally.** The default is Alt Gr, which on
 Spanish, Latin American and most European layouts is how you type `@ \ | ~ [ ] { }`.
@@ -187,18 +230,31 @@ Set `key = "scroll_lock"` instead.
 
 ## Status
 
-Developed and verified on Fedora 41 / GNOME 47 / Wayland. The core is not tied
-to that: the hotkey reads `/dev/input` and the paste writes to `/dev/uinput`,
-both kernel interfaces that work under any desktop, X11 or Wayland. Distros
-without systemd fall back to a `GROUP="input"` udev rule.
+This is a personal tool — part of my [portfolio](https://dan-araya.github.io).
+It solves *my* dictation needs and I publish it in case it solves yours too.
+It is not a service, has no release schedule, and carries no support guarantees.
 
-Windows is **confirmed working**: install with uv, `doctor` green, and dictation
-into Notepad and Google Docs with the default settings. Its `setup` — the
-autostart shortcut — is still untested.
+**What is verified:**
 
-X11 and non-systemd distros are **implemented but not yet tested**.
-See [TESTING.md](TESTING.md) for exactly what has been verified and
-[TODO.md](TODO.md) for open items.
+| Platform | Desktop | Path | Result |
+|---|---|---|---|
+| Fedora 41 | GNOME 47 / Wayland | evdev + uinput | dictation working end to end |
+| Windows 11 | — | pynput | dictation working end to end |
+
+**What should work but hasn't been tested:**
+
+- **X11 sessions** — a different code path (pynput for the hotkey, xdotool or
+  uinput for paste). The logic is there but no clean VM run yet.
+- **Non-systemd distros** — the `GROUP="input"` udev fallback is written but
+  hasn't run on a real machine without logind.
+- **KDE / other Wayland compositors** — only GNOME/mutter has been exercised.
+
+If you try it on one of those and it breaks, open an issue — I can't promise a
+timeline, but I'll look into it.
+
+[TESTING.md](TESTING.md) has the full list of what's been verified and
+a checklist for anyone who wants to test on a different setup. [TODO.md](TODO.md)
+tracks known rough edges and open decisions.
 
 ## Contributing
 

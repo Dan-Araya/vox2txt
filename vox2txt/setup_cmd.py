@@ -2,6 +2,12 @@
 
 Everything privileged lives here, and nothing runs without showing the exact
 command first and asking.
+
+Saying no is a supported way to use this command, not a dead end. Handing your
+sudo password to a program you downloaded is a fair thing to refuse, so both
+decision points spell out the do-it-yourself route *before* asking, and print
+the full list of commands if you take it. The rule that keeps that honest: what
+setup would run and what it tells you to run must be the same commands.
 """
 
 import os
@@ -13,6 +19,7 @@ from pathlib import Path
 
 UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-vox2txt.rules")
 MODULE_CONF_PATH = Path("/etc/modules-load.d/vox2txt.conf")
+UINPUT_DEVICE = Path("/dev/uinput")
 UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / "vox2txt.service"
 
 # uaccess makes logind hand an ACL to whoever owns the active local session,
@@ -62,20 +69,45 @@ def _install_hint(binary: str) -> str:
             return f"{command} {names.get(manager, names.get('default', binary))}"
     return f"install '{binary}' with your package manager"
 
+# Restart=on-failure and not 'always': 'systemctl --user stop' and Ctrl+C both
+# exit 0 and must stay stopped. StartLimit* caps the damage when the failure is
+# instant and permanent (a bad config, say), which would otherwise retry every
+# five seconds forever. PYTHONUNBUFFERED matters more than it looks: with no tty
+# Python buffers stdout, so without it none of the diagnostics reach the journal
+# until the process dies.
 UNIT_TEMPLATE = """\
 [Unit]
 Description=vox2txt push-to-talk transcription
 PartOf=graphical-session.target
 After=graphical-session.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart={exec_path}
 Restart=on-failure
-RestartSec=3
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=vox2txt
 
 [Install]
 WantedBy=graphical-session.target
+"""
+
+# The Windows counterpart of Restart=on-failure. The launcher has to *wait* on
+# the process to notice it died, so unlike the previous version it cannot use
+# 'start /min' -- a console window stays visible.
+WINDOWS_LAUNCHER = """\
+@echo off
+set tries=0
+:loop
+"{exec_path}"
+if not errorlevel 1 exit /b 0
+set /a tries+=1
+if %tries% geq 5 exit /b 1
+timeout /t 5 /nobreak >nul
+goto loop
 """
 
 
@@ -138,62 +170,148 @@ def _sudo_write(path: Path, content: str) -> bool:
     return proc.returncode == 0
 
 
-def _setup_linux() -> int:
-    exec_path = shutil.which("vox2txt") or f"{sys.executable} -m vox2txt"
+def _root_steps(udev_rule: str) -> list[tuple[str, str, object]]:
+    """What still needs doing, as (description, visible command, thunk).
 
-    udev_rule = UDEV_RULE_UACCESS if _has_logind() else UDEV_RULE_GROUP
+    The applying commands (modprobe, udevadm) belong in here rather than in the
+    'yes' branch: a list you are invited to run by hand has to be sufficient on
+    its own, and writing a udev rule without reloading it does nothing.
+    """
+    steps: list[tuple[str, str, object]] = []
 
-    # (description, copy-pasteable command, thunk that performs it)
-    root_steps = []
-    if not UDEV_RULE_PATH.exists():
-        root_steps.append((
+    wrote_rule = not UDEV_RULE_PATH.exists()
+    if wrote_rule:
+        steps.append((
             f"write {UDEV_RULE_PATH} so /dev/uinput is usable without root",
             f"printf '%s\\n' {shlex.quote(udev_rule)} | sudo tee {UDEV_RULE_PATH}",
             lambda: _sudo_write(UDEV_RULE_PATH, udev_rule),
         ))
     if _has_systemd() and not MODULE_CONF_PATH.exists():
-        root_steps.append((
+        steps.append((
             f"write {MODULE_CONF_PATH} so the uinput module loads at boot",
             f"printf '%s\\n' {shlex.quote(MODULE_CONF)} | sudo tee {MODULE_CONF_PATH}",
             lambda: _sudo_write(MODULE_CONF_PATH, MODULE_CONF),
         ))
     if not _input_group_member():
         usermod = ["sudo", "usermod", "-aG", "input", _username()]
-        root_steps.append((
+        steps.append((
             "add you to the 'input' group so the hotkey can read /dev/input",
             shlex.join(usermod),
             lambda cmd=usermod: _run(cmd),
         ))
+
+    if not UINPUT_DEVICE.exists():
+        modprobe = ["sudo", "modprobe", "uinput"]
+        steps.append((
+            "load the uinput module now, without waiting for a reboot",
+            shlex.join(modprobe),
+            lambda cmd=modprobe: _run(cmd),
+        ))
+    if wrote_rule:
+        for cmd in (["sudo", "udevadm", "control", "--reload-rules"],
+                    ["sudo", "udevadm", "trigger"]):
+            steps.append((
+                "apply the rule just written",
+                shlex.join(cmd),
+                lambda cmd=cmd: _run(cmd),
+            ))
+
+    return steps
+
+
+def _print_commands(commands, indent: str = "  ") -> None:
+    for command in commands:
+        print(f"{indent}{command}")
+
+
+def _autostart_script(unit_text: str, enable_cmd: list[str]) -> str:
+    """The autostart install as something you can paste into a shell."""
+    return (
+        f"mkdir -p {UNIT_PATH.parent}\n"
+        f"cat > {UNIT_PATH} <<'EOF'\n"
+        f"{unit_text}"
+        "EOF\n"
+        "systemctl --user daemon-reload\n"
+        f"{shlex.join(enable_cmd)}"
+    )
+
+
+def _setup_linux() -> int:
+    exec_path = shutil.which("vox2txt") or f"{sys.executable} -m vox2txt"
+
+    udev_rule = UDEV_RULE_UACCESS if _has_logind() else UDEV_RULE_GROUP
+    root_steps = _root_steps(udev_rule)
+
+    # Commands the user is left to run themselves, gathered as we go.
+    pending: list[str] = []
 
     if root_steps:
         print("\nThese steps need root:\n")
         for description, display, _action in root_steps:
             print(f"  - {description}")
             print(f"      {display}")
-        print()
+        print("\nYou can do this either way:\n")
+        print("  a) Let setup run them. It calls sudo, so your password is typed")
+        print("     here, inside vox2txt.")
+        print("  b) Say no and run the commands above yourself, in another")
+        print("     terminal. Nothing later in setup depends on having done it")
+        print("     here.\n")
+
         if not _confirm("Run them now with sudo?"):
-            print("Skipped. You can run the commands above by hand.")
+            pending = [display for _d, display, _a in root_steps]
+            print("\nSkipped -- nothing was changed. Run these yourself, in order:\n")
+            _print_commands(pending)
         else:
-            for _description, _display, action in root_steps:
+            for index, (_description, _display, action) in enumerate(root_steps):
                 if not action():
-                    print("\n[!] That step failed. Stopping.")
+                    print("\n[!] That step failed. Stopping. Still to do, by hand:\n")
+                    _print_commands([d for _x, d, _y in root_steps[index:]])
                     return 1
-            _run(["sudo", "modprobe", "uinput"])
-            _run(["sudo", "udevadm", "control", "--reload-rules"])
-            _run(["sudo", "udevadm", "trigger"])
     else:
         print("\n[ok] System permissions already in place.")
 
     print()
+    autostart_pending = False
     if not _has_systemd():
         print("[--] No systemd here, so no autostart unit. Launch vox2txt from")
         print("     whatever your desktop uses for startup programs.")
-    elif _confirm("Start vox2txt automatically when you log in?"):
-        UNIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        UNIT_PATH.write_text(UNIT_TEMPLATE.format(exec_path=exec_path), encoding="utf-8")
-        print(f"  wrote {UNIT_PATH}")
-        _run(["systemctl", "--user", "daemon-reload"])
-        _run(["systemctl", "--user", "enable", "--now", "vox2txt.service"])
+    else:
+        unit_text = UNIT_TEMPLATE.format(exec_path=exec_path)
+        # '--now' would start vox2txt immediately, which cannot work while the
+        # permission steps are still pending: it would fail, be restarted, and
+        # hit the start limit. Without it the unit waits for the next login,
+        # which is when the 'input' group takes effect anyway.
+        enable_cmd = ["systemctl", "--user", "enable"]
+        if not pending:
+            enable_cmd.append("--now")
+        enable_cmd.append("vox2txt.service")
+
+        print(f"Autostart writes this unit to {UNIT_PATH}:\n")
+        for line in unit_text.splitlines():
+            print(f"  {line}")
+        print("\nand then runs:\n")
+        _print_commands(["systemctl --user daemon-reload", shlex.join(enable_cmd)])
+        if pending:
+            print("\n('--now' is left out: starting vox2txt before the permission")
+            print(" steps above are done would only fail. Next login will do it.)")
+        print("\nYou can do this either way:\n")
+        print("  a) Let setup do it.")
+        print("  b) Say no and write the file yourself with the block below.")
+        print("     No sudo either way -- this is a user unit, under your home.\n")
+
+        if _confirm("Start vox2txt automatically when you log in?"):
+            UNIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            UNIT_PATH.write_text(unit_text, encoding="utf-8")
+            print(f"  wrote {UNIT_PATH}")
+            _run(["systemctl", "--user", "daemon-reload"])
+            _run(enable_cmd)
+            print("\n  It restarts itself on failure. To check on it:")
+            print("    systemctl --user status vox2txt")
+            print("    journalctl --user -u vox2txt -f")
+        else:
+            autostart_pending = True
+            print("\nSkipped. To install it yourself, paste this:\n")
+            print(_autostart_script(unit_text, enable_cmd))
 
     from .config import write_default_config
 
@@ -208,7 +326,20 @@ def _setup_linux() -> int:
             "    the hotkey will only work if /dev/input happens to be readable\n"
             "    by everyone."
         )
-    print("\nDone. Run 'vox2txt' to start, or 'vox2txt doctor' to check everything.")
+
+    if pending or autostart_pending:
+        print("\n[!] Setup did not finish -- you chose to do part of it yourself.")
+        print("    Still to do:\n")
+        if pending:
+            _print_commands(pending, indent="      ")
+        if autostart_pending:
+            print("      the autostart block printed just above")
+        if pending:
+            print("\n    Then log out and back in: the 'input' group only applies")
+            print("    to new sessions.")
+        print("\n    'vox2txt doctor' will tell you when it is all in place.")
+    else:
+        print("\nDone. Run 'vox2txt' to start, or 'vox2txt doctor' to check everything.")
     return 0
 
 
@@ -232,9 +363,13 @@ def _setup_windows() -> int:
         )
         startup.mkdir(parents=True, exist_ok=True)
         launcher = startup / "vox2txt.cmd"
-        launcher.write_text(f'@echo off\r\nstart "" /min "{exec_path}"\r\n', encoding="utf-8")
+        launcher.write_text(
+            WINDOWS_LAUNCHER.format(exec_path=exec_path).replace("\n", "\r\n"),
+            encoding="utf-8",
+        )
         print(f"  wrote {launcher}")
-        print("  (it starts minimised; a console window will still appear in the taskbar)")
+        print("  (a console window stays open; the launcher needs it to restart")
+        print("   vox2txt if it exits with an error, up to 5 times)")
 
     from .config import write_default_config
 

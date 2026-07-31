@@ -1,5 +1,10 @@
 # Testing status and procedure
 
+> This document is a **testing log and reference guide**. It lists every scenario
+> the code path touches, not a set of release gates. vox2txt is a personal tool
+> — it ships when it works on my machines. The VM checklist below is here for
+> anyone curious enough to test on their own setup.
+
 ## What has actually been verified
 
 All on one machine: Fedora 41, GNOME 47, Wayland, Python 3.13.
@@ -19,11 +24,20 @@ All on one machine: Fedora 41, GNOME 47, Wayland, Python 3.13.
 | `paste.shortcut` parser, valid and invalid input | pass, bad values rejected with a reason |
 | `vox2txt` starts and reaches "ready" | pass |
 | `vox2txt setup` dry run (stdin closed) | lists correct, copy-pasteable commands |
+| `vox2txt setup` run for real, sudo steps included | wrote the udev rule and `modules-load.d`, ran `usermod`, `modprobe`, `udevadm` |
+| The `uaccess` branch of the udev rule | works — `getfacl /dev/uinput` shows `user:dan:rw-`, no group needed |
+| Autostart unit installed and enabled | `active (running)`, started by `enable --now` |
 | Dependency tree size | 388 MB |
 | `base` model download | 142 MB |
 
 The shortcut results are why `paste.shortcut` exists: no combination covers both
 terminals and GUI apps, and they are exact inverses of each other.
+
+One caveat on the permission rows: the `uaccess` result is trustworthy —
+`/dev/uinput` is `0660` plus an ACL, so the ACL is doing the work. The `input`
+group is **not** validated on this machine, because the malformed
+`51-android.rules` described in `TODO.md` leaves every `/dev/input/event*` at
+`0666`. The hotkey would read them with or without the group.
 
 > Testing paste by spawning windows is unreliable on a machine someone is using
 > — a stray window steals focus and the text lands somewhere else. Close every
@@ -38,12 +52,19 @@ Be explicit about this, because it is most of the surface area.
   array straight to `Transcriber`; `Recorder` and its `sounddevice` stream
   have never run there. They do work on Windows — see below — so the code is
   not wrong, but PortAudio is a different backend on each platform.
-- **`vox2txt setup` actually executing.** Only the dry run was tested; the
-  sudo steps were never run, so the udev rule and `modules-load.d` file have
-  never been written by the tool.
-- **The systemd user unit.** Never installed, never enabled, never confirmed
-  to start at login. `graphical-session.target` is reached under GNOME and
-  KDE but not under every bare window manager.
+- **`vox2txt setup` declining the sudo steps.** The accept path has now been
+  run for real; the decline path is covered only by the fake-`sudo`-on-`PATH`
+  procedure below, never by someone actually installing that way.
+- **Autostart surviving a reboot.** The unit is installed, enabled and running,
+  but it was started by `enable --now`, not by reaching
+  `graphical-session.target` at login. That target is reached under GNOME and
+  KDE, not under every bare window manager.
+- **A real restart after a real failure.** `systemd-analyze --user verify`
+  accepts the unit and the exit codes it reacts to are covered by the fake
+  hotkey and fake transcriber described below, but no keyboard has been
+  unplugged and no process killed on a live session.
+- **The Windows launcher's retry loop.** The `.cmd` was rewritten to wait on
+  the process and relaunch it up to five times; never executed.
 - **Windows.** Barely started — see the section below.
 - **X11.** A different code path end to end: `pynput` for the hotkey (needs
   the `x11` extra) and `xdotool` for the paste.
@@ -111,7 +132,7 @@ recorded.
 ### Test the install the way a user will
 
 Do not copy the repo into the guest. Once the code is pushed, install from
-GitHub, which is the same path as PyPI minus the index:
+GitHub, the canonical install path:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -159,6 +180,73 @@ The paste path can be checked independently with a GTK window that receives the
 injected Ctrl+V — see the approach in the project history, or simply focus a
 text editor and run `vox2txt` with `mode = "auto"`.
 
+### Testing the restart paths without hardware
+
+The point of the exit codes is that a supervisor can act on them, so what needs
+checking is which failures reach `run()` as a non-zero return. Both halves can
+be faked.
+
+`on_lost` must fire when the *last* keyboard reader dies, not the first — patch
+`evdev.list_devices` and `evdev.InputDevice` with objects whose `read_loop()`
+raises `OSError` after a delay, pass two of them to `hotkey._start_evdev`, and
+confirm a single call:
+
+```python
+class FakeDevice:
+    def __init__(self, name, die_after): self.name, self._t = name, die_after
+    def capabilities(self): return {ecodes.EV_KEY: [ecodes.KEY_RIGHTALT]}
+    def read_loop(self):
+        time.sleep(self._t); raise OSError(19, "No such device")
+        yield
+```
+
+For `app.run()`, replace `app.Transcriber` with one whose `transcribe()` raises,
+`app.Recorder` with a no-op, and `app.hotkey.start` with a stub that either
+calls `on_lost` or drives `on_press`/`on_release` a few times. Three cases,
+three expected exits:
+
+| stub does | expected `run()` |
+|---|---|
+| calls `on_lost(...)` | `1` |
+| three press/release cycles with a failing transcriber | `1` |
+| sends itself `SIGTERM` | `0` |
+
+The third matters as much as the other two: `Restart=on-failure` means a clean
+stop has to exit 0, or `systemctl --user stop` would fight the restart policy.
+
+Validate the unit itself with `systemd-analyze --user verify` on the rendered
+`UNIT_TEMPLATE` — it catches directives in the wrong section, which is easy to
+get wrong with `StartLimitIntervalSec` (it belongs in `[Unit]`, not
+`[Service]`).
+
+### Testing `vox2txt setup` without touching the system
+
+Everything with an effect goes through `sudo`, `systemctl`, `udevadm` or
+`modprobe`, so a directory of fakes at the front of `PATH` intercepts all of it,
+and `_confirm` reads stdin, so the answers come from a pipe:
+
+```bash
+d=$(mktemp -d)
+for c in sudo systemctl udevadm modprobe; do
+  printf '#!/bin/sh\necho "%s $*" >> '"$d"'/calls\n' "$c" > "$d/$c"
+  chmod +x "$d/$c"
+done
+
+printf 'n\nn\n' | PATH="$d:$PATH" .venv/bin/python -m vox2txt setup
+cat "$d/calls" 2>/dev/null || echo "nothing ran, as it should"
+```
+
+To reach the root steps on a machine where they are already done, point the
+paths at a temporary directory before calling `_setup_linux()`:
+`setup_cmd.UDEV_RULE_PATH`, `MODULE_CONF_PATH`, `UINPUT_DEVICE`, `UNIT_PATH`,
+plus stubs for `_input_group_member` and `_username`.
+
+The property worth asserting is that **the two branches agree**: answer `y` with
+the fake `sudo` in place, and every command in `$d/calls` must appear in what
+answering `n` printed. A list you are invited to run by hand is only useful if
+it is the same list. Check too that declining leaves the unit file unwritten,
+and that `enable` drops `--now` when the permission steps are still pending.
+
 ### Gotchas specific to VMs
 
 - **The VM viewer eats keys.** SPICE and VNC clients intercept some
@@ -190,4 +278,9 @@ text editor and run `vox2txt` with `mode = "auto"`.
 [ ] hold and release with no speech     -> "No speech detected", no invented text
 [ ] type @ or [ with an AltGr layout    -> does the default hotkey misfire?
 [ ] autostart, if enabled               -> running after a reboot
+[ ] systemctl --user kill -s KILL vox2txt  -> back up within ~5s, NRestarts=1
+[ ] unplug and replug the keyboard      -> "Fatal: keyboard ... disappeared" in
+                                           the journal, hotkey works again
+[ ] break paste.shortcut, restart       -> failed (start-limit-hit) after 5 tries,
+                                           not an endless loop
 ```

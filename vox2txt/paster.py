@@ -6,6 +6,15 @@ import threading
 import time
 
 
+class ClipboardToolMissing(RuntimeError):
+    """No clipboard helper (wl-copy, xclip, xsel) is installed.
+
+    Deliberately not SystemExit: this is raised from the transcription worker
+    thread, and Python silently discards SystemExit raised off the main thread,
+    which would kill the worker and tell nobody.
+    """
+
+
 def _is_wayland() -> bool:
     return bool(os.environ.get("WAYLAND_DISPLAY"))
 
@@ -20,7 +29,7 @@ def _copy_to_clipboard(text: str):
         try:
             subprocess.run(["wl-copy"], input=encoded, check=True, timeout=3)
         except FileNotFoundError:
-            raise SystemExit(
+            raise ClipboardToolMissing(
                 "wl-clipboard not found. Install it:\n"
                 "  Fedora:  sudo dnf install wl-clipboard\n"
                 "  Ubuntu:  sudo apt install wl-clipboard"
@@ -34,11 +43,16 @@ def _copy_to_clipboard(text: str):
         try:
             subprocess.run(["xsel", "--clipboard", "--input"], input=encoded, check=True, timeout=3)
         except FileNotFoundError:
-            raise SystemExit(
+            raise ClipboardToolMissing(
                 "No clipboard tool found. Install one:\n"
                 "  Fedora:  sudo dnf install xclip\n"
                 "  Ubuntu:  sudo apt install xclip"
             )
+
+
+def notify(title: str, body: str):
+    """Desktop notification, falling back to stdout. Public form of _notify."""
+    _notify(title, body)
 
 
 def _notify(title: str, body: str):
@@ -150,6 +164,16 @@ def warm_up():
     """Pre-create the virtual keyboard. Safe to call on non-Wayland; it no-ops."""
     if _is_wayland() and platform.system() == "Linux":
         _keyboard.warm_up()
+
+
+def virtual_keyboard_failed() -> bool:
+    """True once the uinput device could not be created.
+
+    The flag is sticky by design — retrying per paste would pay the settle cost
+    over and over — so the only way back is a fresh process. Callers use this to
+    decide whether a failed paste is worth dying (and being restarted) over.
+    """
+    return _keyboard._failed
 
 
 def _ydotool_ready() -> bool:

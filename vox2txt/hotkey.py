@@ -9,7 +9,11 @@ event devices — either group membership or an ACL:
 
 import os
 import threading
-from typing import Callable
+import time
+from typing import Callable, Optional
+
+# How long to keep looking for a keyboard before declaring there is none.
+_DEVICE_WAIT = 5.0
 
 _KEY_MAP = {
     "alt_gr": "alt_gr",
@@ -17,8 +21,14 @@ _KEY_MAP = {
     "scroll_lock": "scroll_lock",
 }
 
+# Callback invoked when the last keyboard listener dies. Losing it leaves the
+# process alive but deaf, which no supervisor can detect, so whoever passes it
+# is expected to end the process and let the restart rescan the devices.
+OnLost = Optional[Callable[[str], None]]
 
-def _start_pynput(key_name: str, on_press: Callable, on_release: Callable):
+
+def _start_pynput(key_name: str, on_press: Callable, on_release: Callable,
+                  on_lost: OnLost = None):
     try:
         from pynput import keyboard
     except ImportError:
@@ -55,10 +65,20 @@ def _start_pynput(key_name: str, on_press: Callable, on_release: Callable):
 
     listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
     listener.start()
+
+    if on_lost is not None:
+        # join() returns as soon as the listener stops, whether it was told to
+        # or it died on its own. Either way the hotkey is gone.
+        threading.Thread(
+            target=lambda: (listener.join(), on_lost("keyboard listener stopped")),
+            daemon=True,
+        ).start()
+
     return listener
 
 
-def _start_evdev(key_name: str, on_press: Callable, on_release: Callable):
+def _start_evdev(key_name: str, on_press: Callable, on_release: Callable,
+                 on_lost: OnLost = None):
     import evdev
     from evdev import ecodes
 
@@ -84,7 +104,17 @@ def _start_evdev(key_name: str, on_press: Callable, on_release: Callable):
                 continue
         return devices
 
+    # Autostarted at login, this can run before logind has applied the uaccess
+    # ACLs to /dev/input, and a keyboard that is merely late looks exactly like
+    # one that is missing. A few seconds of polling covers that race (and a
+    # Bluetooth keyboard that reconnects) without making a genuine permission
+    # problem take noticeably longer to report.
+    deadline = time.monotonic() + _DEVICE_WAIT
     keyboards = find_keyboards()
+    while not keyboards and time.monotonic() < deadline:
+        time.sleep(0.5)
+        keyboards = find_keyboards()
+
     if not keyboards:
         raise RuntimeError(
             "No keyboard found via evdev. Grant read access to /dev/input with either:\n"
@@ -94,8 +124,14 @@ def _start_evdev(key_name: str, on_press: Callable, on_release: Callable):
 
     pressed = False
 
+    # Unplugging one of several keyboards is normal and harmless; losing the
+    # last one is what leaves the hotkey dead.
+    alive = len(keyboards)
+    alive_lock = threading.Lock()
+
     def _read(dev):
-        nonlocal pressed
+        nonlocal pressed, alive
+        reason = "stopped"
         try:
             for event in dev.read_loop():
                 if event.type == ecodes.EV_KEY and event.code == target_code:
@@ -105,8 +141,14 @@ def _start_evdev(key_name: str, on_press: Callable, on_release: Callable):
                     elif event.value == 0 and pressed:
                         pressed = False
                         on_release()
-        except (OSError, evdev.device.EvdevError):
-            pass
+        except (OSError, evdev.device.EvdevError) as exc:
+            reason = str(exc) or exc.__class__.__name__
+        finally:
+            with alive_lock:
+                alive -= 1
+                last = alive == 0
+            if last and on_lost is not None:
+                on_lost(f"keyboard '{dev.name}' disappeared: {reason}")
 
     threads = []
     for kb in keyboards:
@@ -117,11 +159,15 @@ def _start_evdev(key_name: str, on_press: Callable, on_release: Callable):
     return threads
 
 
-def start(key_name: str, on_press: Callable, on_release: Callable):
-    """Start the global hotkey listener. Returns the listener object."""
+def start(key_name: str, on_press: Callable, on_release: Callable,
+          on_lost: OnLost = None):
+    """Start the global hotkey listener. Returns the listener object.
+
+    'on_lost' is called with a reason once no listener is left reading keys.
+    """
     key_name = _KEY_MAP.get(key_name, key_name)
 
     if os.environ.get("WAYLAND_DISPLAY"):
-        return _start_evdev(key_name, on_press, on_release)
+        return _start_evdev(key_name, on_press, on_release, on_lost)
     else:
-        return _start_pynput(key_name, on_press, on_release)
+        return _start_pynput(key_name, on_press, on_release, on_lost)

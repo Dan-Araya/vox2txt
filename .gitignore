@@ -11,3 +11,7 @@ build/
 # Local overrides: config.toml in the working directory shadows the real
 # user config, which is handy for development but must not be committed.
 /config.toml
+
+# Personal notes: drafts, published texts, things that are about the project
+# rather than part of it.
+/notes.md

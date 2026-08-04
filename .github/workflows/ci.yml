@@ -39,8 +39,7 @@ jobs:
       - name: Config round-trips
         run: |
           python -c "
-          import tomllib
-          from vox2txt.config import DEFAULT_CONFIG_TOML, load, write_default_config
+          from vox2txt.config import DEFAULT_CONFIG_TOML, load, tomllib, write_default_config
           from pathlib import Path
           tomllib.loads(DEFAULT_CONFIG_TOML)
           p = write_default_config()

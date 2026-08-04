@@ -239,8 +239,15 @@ def _autostart_script(unit_text: str, enable_cmd: list[str]) -> str:
 def _setup_linux() -> int:
     exec_path = shutil.which("vox2txt") or f"{sys.executable} -m vox2txt"
 
-    udev_rule = UDEV_RULE_UACCESS if _has_logind() else UDEV_RULE_GROUP
-    root_steps = _root_steps(udev_rule)
+    wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
+    if wayland:
+        udev_rule = UDEV_RULE_UACCESS if _has_logind() else UDEV_RULE_GROUP
+        root_steps = _root_steps(udev_rule)
+    else:
+        # X11 uses pynput for the hotkey and xdotool for paste. Neither needs
+        # raw access to /dev/input or /dev/uinput, so do not ask the user to
+        # grant broad kernel input permissions they will not use.
+        root_steps = []
 
     # Commands the user is left to run themselves, gathered as we go.
     pending: list[str] = []
@@ -267,22 +274,26 @@ def _setup_linux() -> int:
                     print("\n[!] That step failed. Stopping. Still to do, by hand:\n")
                     _print_commands([d for _x, d, _y in root_steps[index:]])
                     return 1
-    else:
+    elif wayland:
         print("\n[ok] System permissions already in place.")
+    else:
+        print("\n[ok] X11 needs no kernel input permissions. Hotkeys use pynput")
+        print("     and paste uses xdotool; 'vox2txt doctor' checks both.")
 
     print()
-    autostart_pending = False
     if not _has_systemd():
         print("[--] No systemd here, so no autostart unit. Launch vox2txt from")
         print("     whatever your desktop uses for startup programs.")
     else:
         unit_text = UNIT_TEMPLATE.format(exec_path=exec_path)
         # '--now' would start vox2txt immediately, which cannot work while the
-        # permission steps are still pending: it would fail, be restarted, and
-        # hit the start limit. Without it the unit waits for the next login,
-        # which is when the 'input' group takes effect anyway.
+        # permission steps are still pending *or* after usermod succeeded in a
+        # session that does not have the new input gid yet. In either case the
+        # process would fail, be restarted, and hit the start limit. Without it
+        # the enabled unit waits for the next login, when the gid is active.
         enable_cmd = ["systemctl", "--user", "enable"]
-        if not pending:
+        can_start_now = not pending and (not wayland or _input_group_active())
+        if can_start_now:
             enable_cmd.append("--now")
         enable_cmd.append("vox2txt.service")
 
@@ -291,9 +302,9 @@ def _setup_linux() -> int:
             print(f"  {line}")
         print("\nand then runs:\n")
         _print_commands(["systemctl --user daemon-reload", shlex.join(enable_cmd)])
-        if pending:
-            print("\n('--now' is left out: starting vox2txt before the permission")
-            print(" steps above are done would only fail. Next login will do it.)")
+        if not can_start_now:
+            print("\n('--now' is left out: this session does not have every input")
+            print(" permission yet. The enabled service will start next login.)")
         print("\nYou can do this either way:\n")
         print("  a) Let setup do it.")
         print("  b) Say no and write the file yourself with the block below.")
@@ -309,8 +320,7 @@ def _setup_linux() -> int:
             print("    systemctl --user status vox2txt")
             print("    journalctl --user -u vox2txt -f")
         else:
-            autostart_pending = True
-            print("\nSkipped. To install it yourself, paste this:\n")
+            print("\nSkipped. Autostart is optional. If you want it later, paste this:\n")
             print(_autostart_script(unit_text, enable_cmd))
 
     from .config import write_default_config
@@ -319,7 +329,7 @@ def _setup_linux() -> int:
 
     # Being listed in /etc/group is not the same as the session having the gid.
     # usermod takes effect only at the next login, so check both.
-    if _input_group_member() and not _input_group_active():
+    if wayland and _input_group_member() and not _input_group_active():
         print(
             "\n[!] You are in the 'input' group, but this session predates that\n"
             "    change and does not have it yet. Log out and back in, otherwise\n"
@@ -327,16 +337,12 @@ def _setup_linux() -> int:
             "    by everyone."
         )
 
-    if pending or autostart_pending:
+    if pending:
         print("\n[!] Setup did not finish -- you chose to do part of it yourself.")
         print("    Still to do:\n")
-        if pending:
-            _print_commands(pending, indent="      ")
-        if autostart_pending:
-            print("      the autostart block printed just above")
-        if pending:
-            print("\n    Then log out and back in: the 'input' group only applies")
-            print("    to new sessions.")
+        _print_commands(pending, indent="      ")
+        print("\n    Then log out and back in: the 'input' group only applies")
+        print("    to new sessions.")
         print("\n    'vox2txt doctor' will tell you when it is all in place.")
     else:
         print("\nDone. Run 'vox2txt' to start, or 'vox2txt doctor' to check everything.")
@@ -395,10 +401,30 @@ def _check(label: str, ok: bool, hint: str = "") -> bool:
 
 
 def run_doctor() -> int:
-    from .config import config_path
+    from .config import effective_config_path, load
 
     print("vox2txt doctor\n")
     ok = True
+
+    path = effective_config_path()
+    print(f"  [--] config: {path}{'' if path.exists() else '  (not created yet)'}")
+    key = "alt_gr"
+    paste_mode = "auto"
+    try:
+        cfg = load(path)
+        key = cfg["hotkey"]["key"]
+        paste_mode = cfg["paste"]["mode"]
+        if key not in ("alt_gr", "right_ctrl", "scroll_lock"):
+            raise ValueError(
+                f"unsupported hotkey {key!r}; choose alt_gr, right_ctrl or scroll_lock"
+            )
+        if paste_mode not in ("auto", "clipboard_only"):
+            raise ValueError(
+                f"unsupported paste.mode {paste_mode!r}; choose auto or clipboard_only"
+            )
+        ok &= _check(f"config valid (hotkey: {key}, paste: {paste_mode})", True)
+    except Exception as exc:
+        ok &= _check("config valid", False, str(exc))
 
     # Audio input
     try:
@@ -413,50 +439,84 @@ def run_doctor() -> int:
         wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
         print(f"  [--] session: {'Wayland' if wayland else 'X11 or console'}")
 
-        # Hotkey capture
-        try:
-            import evdev
+        if wayland:
+            # Hotkey capture: inspect the key the user actually configured,
+            # rather than always checking Right Alt.
+            try:
+                import evdev
 
-            readable = []
-            for path in evdev.list_devices():
-                try:
-                    dev = evdev.InputDevice(path)
-                    if evdev.ecodes.KEY_RIGHTALT in dev.capabilities().get(evdev.ecodes.EV_KEY, []):
-                        readable.append(dev.name)
-                except (PermissionError, OSError):
-                    continue
+                key_codes = {
+                    "alt_gr": evdev.ecodes.KEY_RIGHTALT,
+                    "right_ctrl": evdev.ecodes.KEY_RIGHTCTRL,
+                    "scroll_lock": evdev.ecodes.KEY_SCROLLLOCK,
+                }
+                target_code = key_codes.get(key)
+                readable = []
+                if target_code is not None:
+                    for device_path in evdev.list_devices():
+                        try:
+                            dev = evdev.InputDevice(device_path)
+                            if target_code in dev.capabilities().get(evdev.ecodes.EV_KEY, []):
+                                readable.append(dev.name)
+                        except (PermissionError, OSError):
+                            continue
+                ok &= _check(
+                    f"configured keyboard key readable via evdev ({len(readable)} found)",
+                    bool(readable),
+                    "Run 'vox2txt setup', then log out and back in.",
+                )
+            except ImportError:
+                ok &= _check("evdev installed", False, "pip install evdev")
+
+            if paste_mode != "clipboard_only":
+                ok &= _check(
+                    "/dev/uinput writable",
+                    os.access("/dev/uinput", os.W_OK),
+                    "Run 'vox2txt setup'. If it still fails, check that the uinput module is loaded.",
+                )
+
             ok &= _check(
-                f"keyboard readable via evdev ({len(readable)} found)",
-                bool(readable),
-                "Run 'vox2txt setup', then log out and back in.",
+                "wl-copy installed",
+                shutil.which("wl-copy") is not None,
+                f"Install it: {_install_hint('wl-copy')}",
             )
-        except ImportError:
-            ok &= _check("evdev installed", False, "pip install evdev")
+        else:
+            try:
+                import pynput  # noqa: F401
 
-        # Paste injection
-        ok &= _check(
-            "/dev/uinput writable",
-            os.access("/dev/uinput", os.W_OK),
-            "Run 'vox2txt setup'. If it still fails, check that the uinput module is loaded.",
-        )
+                ok &= _check("pynput available for the global hotkey", True)
+            except Exception as exc:
+                ok &= _check(
+                    "pynput available for the global hotkey",
+                    False,
+                    "Install the X11 variant; details: " + str(exc),
+                )
 
-        # Clipboard
-        tool = "wl-copy" if os.environ.get("WAYLAND_DISPLAY") else "xclip"
-        ok &= _check(
-            f"{tool} installed",
-            shutil.which(tool) is not None,
-            f"Install it: {_install_hint(tool)}",
-        )
+            if paste_mode != "clipboard_only":
+                has_xdotool = shutil.which("xdotool") is not None
+                has_uinput = os.access("/dev/uinput", os.W_OK)
+                ok &= _check(
+                    "paste injection available (xdotool or /dev/uinput)",
+                    has_xdotool or has_uinput,
+                    f"Install it: {_install_hint('xdotool')}",
+                )
+
+            clipboard_tool = next(
+                (name for name in ("xclip", "xsel") if shutil.which(name)),
+                None,
+            )
+            ok &= _check(
+                f"clipboard helper available{f' ({clipboard_tool})' if clipboard_tool else ''}",
+                clipboard_tool is not None,
+                f"Install it: {_install_hint('xclip')}",
+            )
     else:
         try:
             import pynput  # noqa: F401
 
             ok &= _check("pynput installed", True)
-        except ImportError:
-            ok &= _check("pynput installed", False, "pip install pynput")
-
-    path = config_path()
-    print(f"  [--] config: {path}{'' if path.exists() else '  (not created yet)'}")
+        except Exception as exc:
+            ok &= _check("pynput installed", False, f"pynput failed: {exc}")
 
     print("\nAll good." if ok else "\nSome checks failed; see the hints above.")
     return 0 if ok else 1

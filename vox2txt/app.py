@@ -124,7 +124,7 @@ def run() -> int:
     key = cfg["hotkey"]["key"]
     try:
         hotkey.start(key, on_press, on_release, on_lost=die)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         print(f"[vox2txt] {exc}")
         return 1
 

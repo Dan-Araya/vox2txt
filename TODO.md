@@ -4,22 +4,26 @@
 
 - [x] **Replace the placeholder URLs.** Now `github.com/Dan-Araya/vox2txt`
       everywhere: `pyproject.toml`, `README.md` and `TESTING.md`.
-- [ ] **~Configure PyPI trusted publishing~** — Decided against PyPI. GitHub-only
+- [x] **Add an MIT license file** and include it in both distribution formats.
+- [x] **Add hardware-free automated tests** for config, platform-specific
+      diagnostics, X11 setup and supervisor recovery.
+- [x] **Update CI for current uv.** It now installs into setup-uv's active
+      environment and uses `uvx` for `twine`; the next push must confirm that
+      the GitHub Actions matrix is green.
+- [x] **Confirm the default hotkey.** `alt_gr` remains the maintainer's choice.
+      Its collision with normal typing on Spanish, Latin American and European
+      layouts is documented, with `scroll_lock` and `right_ctrl` as alternatives.
+- [x] **Do not configure PyPI trusted publishing.** GitHub-only
       for now. `publish.yml` has been removed.
+- [ ] **Run the remaining manual release checks.** Real-microphone dictation on
+      Linux now passes. Still needed: a clean GitHub install, autostart after a
+      login/reboot, and a clean install of the release candidate on Windows.
+      See `TESTING.md`.
+- [ ] **Confirm external release state.** CI green after push, repository
+      description/topics set, then create and install-test a `v0.1.0` tag.
 
 ## Open decisions
 
-- [ ] **Default hotkey.** `alt_gr` is a poor default outside US layouts. On
-      Spanish and Latin American layouts AltGr produces `@ \ | ~ [ ] { }`, so
-      ordinary typing starts a recording; the clip is near-silent, VAD returns
-      `""` and the user gets a "No speech detected" notification. `scroll_lock`
-      is unused on virtually every layout and would be a safer default, with
-      `alt_gr` documented as an option. One line in `config.py` and one in
-      `DEFAULT_CONFIG_TOML`. Not changed yet — this is the maintainer's call.
-      Data point: a Windows session dictating in Spanish reported no spurious
-      recordings with the `alt_gr` default. That is one session, not a
-      refutation — the failure mode needs someone *typing* `@` or `[`, which
-      dictating does not do.
 - [ ] **Ship a `.exe`?** Decided against for now. An unsigned PyInstaller build
       that installs a global keyboard hook and synthesises keystrokes is very
       likely to be flagged by Defender/SmartScreen, would weigh 300-500 MB
@@ -37,8 +41,6 @@
       --paste-test` (inject Ctrl+V and report) or a "transcribe this WAV"
       subcommand would make the tool testable on a machine with no mic.
       See `TESTING.md` for the manual workaround.
-- [ ] No tests in CI beyond imports and entry-point resolution. There is no
-      pytest suite; `ci.yml` only smoke-tests.
 - [ ] `hotkey.py` supports exactly three keys (`alt_gr`, `right_ctrl`,
       `scroll_lock`). Arbitrary keys and combinations are not supported, and
       the three cannot be combined with each other either. Deliberately left

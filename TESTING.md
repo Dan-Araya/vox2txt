@@ -7,12 +7,14 @@
 
 ## What has actually been verified
 
-All on one machine: Fedora 41, GNOME 47, Wayland, Python 3.13.
+All on one machine: Fedora 41, GNOME 47, Wayland, Python 3.13. The latest
+real-microphone check was run on 2026-08-04 after reinstalling the package.
 
 | Check | Result |
 |---|---|
 | Wheel builds, installs into a fresh venv | pass |
 | `vox2txt` entry point resolves from outside the repo | pass |
+| Hardware-free unit suite (`python -m unittest discover -v`) | pass — config, Wayland/X11 doctor paths, X11 setup and supervisor recovery |
 | `vox2txt doctor` | 5/5 |
 | Transcription of synthetic speech (base, int8, CPU) | 2.3 s for 3.8 s of audio |
 | 1 s of silence | returns `""` — VAD suppresses the hallucination |
@@ -23,6 +25,7 @@ All on one machine: Fedora 41, GNOME 47, Wayland, Python 3.13.
 | Shift+Insert into gnome-terminal | pastes the *primary selection*, not the clipboard |
 | `paste.shortcut` parser, valid and invalid input | pass, bad values rejected with a reason |
 | `vox2txt` starts and reaches "ready" | pass |
+| Real microphone → Spanish transcription → paste into focused chat | pass |
 | `vox2txt setup` dry run (stdin closed) | lists correct, copy-pasteable commands |
 | `vox2txt setup` run for real, sudo steps included | wrote the udev rule and `modules-load.d`, ran `usermod`, `modprobe`, `udevadm` |
 | The `uaccess` branch of the udev rule | works — `getfacl /dev/uinput` shows `user:dan:rw-`, no group needed |
@@ -44,14 +47,24 @@ group is **not** validated on this machine, because the malformed
 > test window between runs, and check for orphans with
 > `pgrep -af "read -r line"` before trusting a negative result.
 
+### Automated checks
+
+The CI matrix runs on Ubuntu and Windows with Python 3.10 and 3.13. It checks
+installation, imports, the command entry point, configuration round-tripping and
+the hardware-free unit suite:
+
+```bash
+python -m unittest discover -v
+```
+
+Those tests use fake keyboards, audio devices and listeners. They verify failure
+handling and platform routing without pretending to prove that a real desktop,
+microphone or global hotkey works.
+
 ## What has never been exercised
 
 Be explicit about this, because it is most of the surface area.
 
-- **Real microphone capture on Linux.** The transcription test fed a numpy
-  array straight to `Transcriber`; `Recorder` and its `sounddevice` stream
-  have never run there. They do work on Windows — see below — so the code is
-  not wrong, but PortAudio is a different backend on each platform.
 - **`vox2txt setup` declining the sudo steps.** The accept path has now been
   run for real; the decline path is covered only by the fake-`sudo`-on-`PATH`
   procedure below, never by someone actually installing that way.
@@ -65,13 +78,13 @@ Be explicit about this, because it is most of the surface area.
   unplugged and no process killed on a live session.
 - **The Windows launcher's retry loop.** The `.cmd` was rewritten to wait on
   the process and relaunch it up to five times; never executed.
-- **Windows.** Barely started — see the section below.
+- **Additional Windows environments.** The one Windows 11 machine below works,
+  but no second machine or clean reinstall of the release candidate exists yet.
 - **X11.** A different code path end to end: `pynput` for the hotkey (needs
   the `x11` extra) and `xdotool` for the paste.
 - **Distros without systemd.** The `GROUP="input"` udev fallback is written
   but has never run.
 - **CUDA**, models other than `base`, languages other than Spanish.
-- **`uv tool install vox2txt`** from a real index — the package is unpublished.
 - **The ydotool fallback.** `_ydotool_ready()` was confirmed to reject a stale
   socket, but the fallback never fires in practice because uinput always
   succeeds first.
@@ -90,7 +103,7 @@ First contact, on a machine with neither uv nor git installed.
 | `vox2txt --help` | pass |
 | `vox2txt doctor` | **crashed**: `ModuleNotFoundError: No module named 'grp'` |
 | `vox2txt doctor`, after the fix | pass — microphone found, pynput present |
-| Dictation into Notepad, Alt Gr held, no config file | pass |
+| Dictation into Notepad, Alt Gr held, no config file | pass — current default |
 | Dictation into Google Docs | pass |
 
 The crash was `setup_cmd.py` importing `grp` and `pwd` at module level. Both are
@@ -105,10 +118,11 @@ injects a paste, never records. The Linux branch checks four things because it
 has four things that can be denied; the Windows branch has no permissions to
 verify, so it verifies almost nothing.
 
-Those two dictation runs are the first end-to-end use of the tool on any
-platform, and they cover more than every Linux check combined: `Recorder` and
-its `sounddevice` stream, a real microphone, the pynput hotkey and the pynput
-paste. They ran with no config file at all, on the built-in defaults.
+Those two dictation runs were the first end-to-end use of the tool. They cover
+`Recorder` and its `sounddevice` stream, a real microphone, the pynput hotkey
+and the pynput paste. They ran with no config file at all, on the built-in
+defaults. The Linux evdev/uinput path has since also passed a real-microphone
+end-to-end check.
 
 Ctrl+V is the right default on Windows, unlike on Linux: it pastes in GUI apps
 *and* in Windows Terminal, so `paste.shortcut` has no reason to be touched there.
@@ -136,7 +150,14 @@ GitHub, the canonical install path:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
 uv tool install git+https://github.com/Dan-Araya/vox2txt
+```
+
+For an X11 guest, use the documented X11 variant instead:
+
+```bash
+uv tool install git+https://github.com/Dan-Araya/vox2txt --with pynput
 ```
 
 That catches packaging mistakes — missing modules, a broken entry point, a
@@ -276,7 +297,8 @@ and that `enable` drops `--now` when the permission steps are still pending.
 [ ] same again, into a terminal         -> does the configured shortcut suit it?
 [ ] long hold                           -> exactly one recording, not several
 [ ] hold and release with no speech     -> "No speech detected", no invented text
-[ ] type @ or [ with an AltGr layout    -> does the default hotkey misfire?
+[ ] default Alt Gr                      -> one recording per hold while dictating
+[ ] type @ or [ with an AltGr layout    -> known collision is visible and documented
 [ ] autostart, if enabled               -> running after a reboot
 [ ] systemctl --user kill -s KILL vox2txt  -> back up within ~5s, NRestarts=1
 [ ] unplug and replug the keyboard      -> "Fatal: keyboard ... disappeared" in

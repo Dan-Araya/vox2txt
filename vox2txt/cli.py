@@ -10,9 +10,12 @@ def main(argv=None):
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("setup", help="Grant input permissions and install the autostart service (Linux), or add a startup shortcut (Windows)")
+    sub.add_parser(
+        "setup",
+        help="Prepare platform permissions where needed and optionally enable autostart",
+    )
     sub.add_parser("config", help="Show the config file path, creating it if missing")
-    sub.add_parser("doctor", help="Check that hotkey capture, paste and audio all work")
+    sub.add_parser("doctor", help="Check configuration and platform prerequisites")
 
     args = parser.parse_args(argv)
 

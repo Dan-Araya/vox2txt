@@ -143,6 +143,16 @@ class _VirtualKeyboard:
                     time.sleep(0.02)
                 return True
             except Exception as exc:
+                # Creation failures set this flag in _ensure(). A device can
+                # also disappear after a successful warm-up; make that failure
+                # equally sticky so app.run() can exit and let its supervisor
+                # recreate the virtual keyboard.
+                try:
+                    ui.close()
+                except Exception:
+                    pass
+                self._ui = None
+                self._failed = True
                 print(f"[vox2txt] Key injection failed: {exc}")
                 return False
 

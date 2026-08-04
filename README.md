@@ -1,23 +1,47 @@
 # vox2txt
 
+[![CI](https://github.com/Dan-Araya/vox2txt/actions/workflows/ci.yml/badge.svg)](https://github.com/Dan-Araya/vox2txt/actions/workflows/ci.yml)
+
 Global push-to-talk dictation. Hold a key, speak, release — the text is pasted straight into whatever window has focus.
 
 Runs fully offline using [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Nothing is sent anywhere.
 
 ## Install
 
-Both platforms need [uv](https://docs.astral.sh/uv/) (installs Python for you) and git.
+Both platforms need [uv](https://docs.astral.sh/uv/) (installs Python for you)
+and Git. The commands below include both on a fresh machine.
 
-**Linux**
+Check your session type with `echo $XDG_SESSION_TYPE`, then use the matching
+Linux path below.
+
+**Linux — Wayland** (the default on current GNOME and KDE)
+
+Install the two system libraries that Python cannot provide:
+
+```bash
+sudo dnf install git portaudio wl-clipboard          # Fedora
+sudo apt install git libportaudio2 wl-clipboard      # Debian, Ubuntu
+sudo pacman -S git portaudio wl-clipboard            # Arch
+```
+
+Then install vox2txt:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"  # make uv available in this terminal
 uv tool install git+https://github.com/Dan-Araya/vox2txt
 vox2txt setup      # one-time: input permissions + optional autostart
+```
+
+If setup added you to the `input` group, **log out and back in** so the new
+permission takes effect. Then verify and start:
+
+```bash
+vox2txt doctor
 vox2txt
 ```
 
-`vox2txt setup` needs root for three things — a udev rule for `/dev/uinput`, the
+On Wayland, `vox2txt setup` needs root for three things — a udev rule for `/dev/uinput`, the
 `uinput` module, and adding you to the `input` group — and it calls `sudo`, so
 your password would be typed inside vox2txt. You don't have to do that. It shows
 you every command before asking, and if you say no it prints the complete list
@@ -25,16 +49,33 @@ for you to run in your own shell. Same for the autostart: it shows the unit file
 and the commands, and declining leaves you a block you can paste. Nothing runs
 without a yes.
 
+**Linux — X11**
+
+```bash
+sudo dnf install git portaudio xclip xdotool          # Fedora
+sudo apt install git libportaudio2 xclip xdotool      # Debian, Ubuntu
+sudo pacman -S git portaudio xclip xdotool            # Arch
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"  # make uv available in this terminal
+uv tool install git+https://github.com/Dan-Araya/vox2txt --with pynput
+vox2txt setup      # optional autostart; no kernel input permissions on X11
+vox2txt
+```
+
 **Windows** (PowerShell)
 
 ```powershell
 winget install --id=astral-sh.uv -e
 winget install --id Git.Git -e
+```
+
+Close and reopen PowerShell so `uv` and `git` are on `PATH`, then run:
+
+```powershell
 uv tool install git+https://github.com/Dan-Araya/vox2txt
 vox2txt
 ```
-
-Reopen PowerShell after the `winget` lines so `uv` and `git` are on `PATH`.
 
 Windows needs no permission setup. Run `vox2txt setup` only if you want it to start automatically at login.
 
@@ -46,7 +87,7 @@ First run downloads the model (142 MB for `base`). After that everything is loca
 
 ```
 vox2txt            # start it
-vox2txt doctor     # check microphone, hotkey, paste and clipboard
+vox2txt doctor     # check configuration and platform prerequisites
 vox2txt config     # print the config file path
 vox2txt setup      # permissions and autostart
 ```
@@ -115,7 +156,10 @@ notify = true
 The hotkey is a closed list of three keys, not an arbitrary key name, and it
 cannot be a combination — push-to-talk needs a key that is held down and does
 nothing else while held, which rules out most of the keyboard. Anything outside
-that list fails at startup with `Unsupported key`.
+that list fails at startup with `Unsupported key`. `alt_gr` is the default. On
+Spanish, Latin American and many European layouts it also types symbols such as
+`@`, `[` and `]`; choose `scroll_lock` or `right_ctrl` if that collision gets in
+your way.
 
 ### Choosing the paste shortcut
 
@@ -166,6 +210,11 @@ Wayland deliberately gives applications no way to read the keyboard globally or 
 - **Hotkey** — reads `/dev/input` directly via evdev, which needs your user in the `input` group.
 - **Paste** — creates a virtual keyboard on `/dev/uinput` and presses the configured shortcut on it. A udev rule tags that device `uaccess`, so logind grants access to whoever owns the active session; no group needed.
 
+Membership in the `input` group allows reading all input devices assigned to
+that group, not only the configured push-to-talk key. That commonly includes
+full keyboard events. `vox2txt setup` shows the exact `usermod` command and lets
+you decline so you can make that security decision yourself.
+
 `vox2txt setup` does both. It prints every privileged command and asks before
 running anything, and if you decline it prints the same list again for you to
 run yourself:
@@ -183,27 +232,23 @@ It only lists what is actually missing, so a second run is usually a no-op.
 
 The `input` group only takes effect on a **new login session** — log out and back in before the hotkey works.
 
-A clipboard tool must be installed — `wl-clipboard` on Wayland, `xclip` on X11:
-
-```bash
-sudo dnf install wl-clipboard      # Fedora
-sudo apt install wl-clipboard      # Debian, Ubuntu
-sudo pacman -S wl-clipboard        # Arch
-```
-
-`vox2txt doctor` names the right package for your distro if it is missing.
+A clipboard tool must be installed — `wl-clipboard` on Wayland, `xclip` on X11.
+The installation commands at the top include the appropriate one, and
+`vox2txt doctor` names the right package if it is missing.
 
 ### On X11
 
 The hotkey uses `pynput` there instead of evdev, and it is **not** installed by
-default. Add it:
+default. If you already installed the Wayland variant, reinstall with the X11
+dependency:
 
 ```bash
-uv tool install --with pynput vox2txt
+uv tool install --reinstall git+https://github.com/Dan-Araya/vox2txt --with pynput
 ```
 
 Pasting uses `xdotool` if present and falls back to the same `/dev/uinput` path
-as Wayland otherwise.
+as Wayland otherwise. The normal X11 path needs neither the `input` group nor
+`/dev/uinput`; `vox2txt setup` only offers autostart there.
 
 ### Why not wtype or ydotool?
 
@@ -220,11 +265,16 @@ in a terminal — readline reads it as quoted-insert. See
 
 **Nothing is pasted, but the text is on the clipboard.** Either the virtual keyboard could not be created — check `/dev/uinput` is writable and the `uinput` module is loaded (`lsmod | grep uinput`) — or the shortcut is wrong for the app you are pasting into.
 
-**The hotkey does nothing.** You are probably not in the `input` group yet, or you have not logged out since being added. Running as a service, `journalctl --user -u vox2txt` says which it is — vox2txt exits rather than sitting there deaf.
+**The hotkey does nothing.** Start with `vox2txt doctor`. On Wayland, you are
+probably not in the `input` group yet or have not logged out since being added.
+On X11, check that you installed the `pynput` variant. Running as a service,
+`journalctl --user -u vox2txt` reports the fatal reason — vox2txt exits rather
+than sitting there deaf.
 
 **The hotkey fires while I am typing normally.** The default is Alt Gr, which on
-Spanish, Latin American and most European layouts is how you type `@ \ | ~ [ ] { }`.
-Set `key = "scroll_lock"` instead.
+Spanish, Latin American and most European layouts is how you type
+`@ \ | ~ [ ] { }`. Set `key = "scroll_lock"` or `key = "right_ctrl"` if that
+tradeoff does not suit you.
 
 **It pastes into the wrong window.** The paste goes wherever focus is when transcription *finishes*, not when you started talking.
 
@@ -263,6 +313,7 @@ git clone https://github.com/Dan-Araya/vox2txt
 cd vox2txt
 uv venv && uv pip install -e .
 .venv/bin/vox2txt doctor
+.venv/bin/python -m unittest discover -v
 ```
 
 For daily use from a checkout, `uv tool install --editable .` puts `vox2txt` on
@@ -270,4 +321,4 @@ your PATH while still pointing at the working tree.
 
 ## License
 
-MIT
+[MIT](LICENSE)

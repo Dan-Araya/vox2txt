@@ -35,7 +35,8 @@ def _start_pynput(key_name: str, on_press: Callable, on_release: Callable,
         raise RuntimeError(
             "This session is not Wayland, so hotkey capture goes through pynput,\n"
             "which is not installed. Add it with:\n"
-            "  uv tool install --with pynput vox2txt\n"
+            "  uv tool install --reinstall "
+            "git+https://github.com/Dan-Araya/vox2txt --with pynput\n"
             "or, in a plain virtualenv:  pip install 'vox2txt[x11]'"
         )
 

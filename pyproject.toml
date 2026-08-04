@@ -9,7 +9,8 @@ description = "Push-to-talk speech to text: hold a key, speak, and the transcrip
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "dan" }]
+license-files = ["LICENSE"]
+authors = [{ name = "Dan Araya" }]
 keywords = ["speech-to-text", "whisper", "push-to-talk", "dictation", "wayland"]
 classifiers = [
     "Environment :: Console",
@@ -48,4 +49,4 @@ vox2txt = "vox2txt.cli:main"
 packages = ["vox2txt"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/vox2txt", "/README.md"]
+include = ["/vox2txt", "/README.md", "/LICENSE"]

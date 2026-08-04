@@ -75,6 +75,12 @@ def config_path() -> Path:
     return base / "vox2txt" / "config.toml"
 
 
+def effective_config_path() -> Path:
+    """Config file load() will read, including the development override."""
+    local = Path.cwd() / "config.toml"
+    return local if local.exists() else config_path()
+
+
 def write_default_config(path: Path | None = None) -> Path:
     """Create the config file if it is not there yet. Returns its path."""
     path = path or config_path()
@@ -88,8 +94,7 @@ def load(path: Path | None = None) -> dict:
     if path is None:
         # A config.toml in the working directory wins, so the repo stays
         # runnable from a checkout without touching the user's real config.
-        local = Path.cwd() / "config.toml"
-        path = local if local.exists() else config_path()
+        path = effective_config_path()
 
     cfg = {k: dict(v) for k, v in _DEFAULTS.items()}
 

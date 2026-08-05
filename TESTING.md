@@ -14,6 +14,7 @@ real-microphone check was run on 2026-08-04 after reinstalling the package.
 |---|---|
 | Wheel builds, installs into a fresh venv | pass |
 | `vox2txt` entry point resolves from outside the repo | pass |
+| `uv tool install git+https://github.com/Dan-Araya/vox2txt`, into an isolated `UV_TOOL_DIR` | pass — resolved `afb2f06`, 386 MB, `--help` and `doctor` green |
 | Hardware-free unit suite (`python -m unittest discover -v`) | pass — config, Wayland/X11 doctor paths, X11 setup and supervisor recovery |
 | `vox2txt doctor` | 5/5 |
 | Transcription of synthetic speech (base, int8, CPU) | 2.3 s for 3.8 s of audio |
@@ -79,7 +80,8 @@ Be explicit about this, because it is most of the surface area.
 - **The Windows launcher's retry loop.** The `.cmd` was rewritten to wait on
   the process and relaunch it up to five times; never executed.
 - **Additional Windows environments.** The one Windows 11 machine below works,
-  but no second machine or clean reinstall of the release candidate exists yet.
+  and a clean reinstall of the v0.1.0 candidate now passes on it, but no second
+  machine has ever run this.
 - **X11.** A different code path end to end: `pynput` for the hotkey (needs
   the `x11` extra) and `xdotool` for the paste.
 - **Distros without systemd.** The `GROUP="input"` udev fallback is written
@@ -130,6 +132,30 @@ Ctrl+V is the right default on Windows, unlike on Linux: it pastes in GUI apps
 Still untested on Windows: `vox2txt setup` and the startup shortcut it writes,
 and the `plyer` notification — whether one appeared during those runs was not
 recorded.
+
+### Clean reinstall of the v0.1.0 candidate, 2026-08-05
+
+Same Windows 11 machine, with the previous version removed first: `uv tool
+uninstall vox2txt`, no `vox2txt.cmd` in the Startup folder, no config file left
+behind. Run from a non-elevated PowerShell.
+
+| Check | Result |
+|---|---|
+| `uv tool install git+https://github.com/Dan-Araya/vox2txt` | pass — resolved `afb2f06`, the commit `v0.1.0` tags |
+| Platform markers | pass — `pynput` and `plyer` installed here, absent on Linux |
+| `vox2txt doctor` with no config file at all | pass — 3/3, config reported as not created yet |
+| First-run download of the `base` model | pass — no cached copy existed on this machine |
+| Dictation into Notepad, Alt Gr held | pass |
+| Dictation into PowerShell | pass — the Ctrl+V default does cover GUI *and* terminal |
+
+This is the first install that followed the README literally instead of working
+from a developer checkout, so it covers the `git+URL` path that CI never
+exercises: CI installs `-e .` from a checkout it already has. The same path was
+run on Linux the same day, isolated in a throwaway `UV_TOOL_DIR`.
+
+`doctor` printing `(not created yet)` next to a green `config valid` reads as a
+contradiction on first contact. It is accurate — the defaults are what gets
+validated — but the wording is worth revisiting.
 
 ## Testing in virtual machines
 

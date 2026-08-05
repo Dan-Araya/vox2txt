@@ -15,12 +15,18 @@
       layouts is documented, with `scroll_lock` and `right_ctrl` as alternatives.
 - [x] **Do not configure PyPI trusted publishing.** GitHub-only
       for now. `publish.yml` has been removed.
-- [ ] **Run the remaining manual release checks.** Real-microphone dictation on
-      Linux now passes. Still needed: a clean GitHub install, autostart after a
-      login/reboot, and a clean install of the release candidate on Windows.
-      See `TESTING.md`.
-- [ ] **Confirm external release state.** CI green after push, repository
-      description/topics set, then create and install-test a `v0.1.0` tag.
+- [x] **Run the remaining manual release checks.** A clean `uv tool install
+      git+...` now passes on both platforms, and the Windows 11 machine ran the
+      whole README path from scratch: no config, first model download, dictation
+      into Notepad and PowerShell. See `TESTING.md`.
+- [x] **Confirm external release state.** CI green on `afb2f06`, description and
+      topics set, `v0.1.0` tagged and released, and that same commit
+      install-tested on Linux and Windows.
+- [ ] **Autostart after a real login or reboot.** The one manual check still
+      open, on both platforms: the systemd unit has only ever been started by
+      `enable --now`, and the Windows `vox2txt.cmd` launcher has never run at
+      login. Not a blocker for the release — it only affects people who opt into
+      autostart.
 
 ## Open decisions
 

@@ -12,6 +12,6 @@ build/
 # user config, which is handy for development but must not be committed.
 /config.toml
 
-# Personal notes: drafts, published texts, things that are about the project
-# rather than part of it.
+# Local working files.
+/notes/
 /notes.md
